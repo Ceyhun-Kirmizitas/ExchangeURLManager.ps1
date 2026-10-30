@@ -129,12 +129,10 @@ Built-in help and full PowerShell help:
 Get-Help .\ExchangeURLManager.ps1 -Full
 ```
 
-## Requirements and validation
+## Requirements
 
 - Exchange Server Mailbox environment, Exchange Management Shell, appropriate Exchange administrative permissions.
 - Windows PowerShell 5.1.
-- Version 1.1 release testing: **77/77 offline regression checks** on Windows PowerShell 5.1, and Exchange LAB testing for Preview, Configure Apply, Backup/Restore, Clone Apply, target/source drift protection, command export, and controlled partial Apply failure. The last scenario used an instrumented **development copy**, not the release script.
-- Some paths, including the interactive and Restore/Clone SSL BLOCKER variants and multi-target partial failures, have offline/static coverage but were not individually exercised in Exchange LAB.
 
 Review the Preview and backup files before making production changes. Use at your own risk; see the script's caution and [LICENSE](LICENSE).
 
