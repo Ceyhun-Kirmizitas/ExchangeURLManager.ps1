@@ -14,17 +14,11 @@ Version 1.1 focuses on safer Apply behavior and clearer Clone reporting. It reta
 - **Exit codes:** BLOCKER/Apply/verification and required pre-change backup failures exit `1`; cancellation, completed read-only operations, and exports return `0`.
 - **Usability:** Clearer Help, console summaries, and Preview labels (`Reference` for Review Only values).
 
-## Validation
-
-- **[OFFLINE]** The updated RC1 regression harness passed all **77/77 checks** on Windows PowerShell 5.1.17763.8385 (2026-10-30). Parser check P01 reported 0 errors, and S01 verified UTF-8 BOM, CRLF-only line endings, and an ASCII script body.
-- **[LAB / LAB-APPLY]** A1 plus mandatory L1–L5 and optional O1–O4 test scenarios passed in Exchange LAB. The O4 failure scenario used a separate instrumented test copy to inject an error. Both test servers were restored to their initial backup state.
-- A new Exchange LAB cycle is not planned for the release-only text and encoding changes.
-
 ## Important notes
 
 - `-OutputFile` is non-destructive. Readiness BLOCKER messages appear in the console, not in the exported command TXT.
 - `-Backup` manual backup failures require checking the per-server summary; nonzero exit codes are not guaranteed for that mode.
 - Certificates, IIS bindings, DNS records, firewalls, load balancers, ASA credentials, SPNs, and Extended Protection configuration remain outside scope.
-- Tested scenarios do not establish exhaustive coverage of every Exchange topology. Review the Preview and backups in your environment.
+- Exchange environments vary. Review the Preview and backups in your environment.
 
 See [README.md](README.md) for examples, [CHANGELOG.md](CHANGELOG.md) for version history, and [LICENSE](LICENSE) for terms.
