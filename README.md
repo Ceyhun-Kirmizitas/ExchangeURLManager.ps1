@@ -1,149 +1,131 @@
 # ExchangeURLManager.ps1
 
-PowerShell tool for reviewing, configuring, backing up, cloning, and restoring supported **Exchange Server Client Access URLs and namespaces**.
+ExchangeURLManager.ps1 helps you review and configure **Exchange Server Client Access URLs and namespaces**. You can also compare settings between servers, create configuration backups, and restore them when needed.
 
-It is intended for side-by-side deployments, upgrades, migrations, server replacement, and day-to-day configuration review. Version 1.1 is intended for Exchange Server 2016, Exchange Server 2019, and Exchange Server Subscription Edition.
+It is useful for Exchange upgrades, side-by-side migrations, server replacements, and regular configuration reviews.
 
-## Download
+## Requirements
 
-- [ExchangeURLManager.ps1](ExchangeURLManager.ps1)
-- [Raw script](https://raw.githubusercontent.com/Ceyhun-Kirmizitas/ExchangeURLManager.ps1/main/ExchangeURLManager.ps1)
+- Exchange Server 2016, 2019, or Subscription Edition (intended compatibility).
+- Windows PowerShell 5.1, Exchange Management Shell, and appropriate Exchange administrative permissions.
 
-Run it in Windows PowerShell 5.1 with Exchange Management Shell available.
+[Download ExchangeURLManager.ps1](https://raw.githubusercontent.com/Ceyhun-Kirmizitas/ExchangeURLManager.ps1/main/ExchangeURLManager.ps1)
 
-## Modes
+## What it does
 
-**Review** (`-Review`) reads supported configuration on one or more servers without making changes. Use `-IncludeAuthentication` to display authentication details.
-
-**Configure** (default) prepares URL and namespace values, shows a Preview, requires confirmation, creates fresh pre-change JSON backups, applies changes, and verifies the results.
-
-**Interactive Configure** (`-Interactive`) offers Common namespace, Select components, and Advanced per-component configuration. It uses the same safety and Apply workflow as Configure.
-
-**Clone** (`-SourceServer`, `-TargetServer`) compares a live source to one or more targets. It is read-only unless `-ApplyChanges` is specified. Source-specific internal URLs, Autodiscover SCP, and Outlook Anywhere InternalHostname are shown as **In sync (target-specific)** if the target already uses its own server name in the same place; no command is generated for those settings.
-
-**Backup** (`-Backup`) creates a versioned JSON file and a readable TXT companion per server. The JSON is the Restore artifact.
-
-**Restore** (`-Restore`, `-BackupFile`) restores settings to the **same** server. Use Clone for server-to-server work.
-
-## Supported settings
-
-- OWA, ECP, EWS, MAPI, ActiveSync, and OAB: InternalUrl and ExternalUrl.
-- Autodiscover SCP: AutoDiscoverServiceInternalUri.
-- Outlook Anywhere (RPC over HTTP): InternalHostname and ExternalHostname.
-- Optional with explicit switches: selected authentication settings, PowerShell InternalUrl/ExternalUrl, and Outlook Anywhere client SSL requirement values.
-- **Review Only**: ASA/Kerberos status, EWS MRSProxyEnabled, Outlook Anywhere SSLOffloading, PowerShell authentication and RequireSSL, and Extended Protection.
-
-Outlook Anywhere settings concern the legacy RPC over HTTP endpoint, not MAPI over HTTP. The script does **not** configure certificates, IIS bindings, DNS records, firewall/NAT, load balancers, SPNs, ASA deployment, or Extended Protection.
-
-## Safety behavior
-
-- Review, Backup, and Clone comparison do not change Exchange configuration. Clone Apply requires `-ApplyChanges`.
-- Configure, Interactive Configure, Restore, and Clone Apply use **Preview -> confirmation -> fresh pre-change JSON backup -> target/source drift check -> Apply -> verification**. All required pre-change backups must succeed before Apply starts.
-- Generated `Set-*` cmdlets and required parameters are checked against the current Exchange Management Shell before Apply.
-- Unresolvable proposed EWS URL hostnames block automatic Apply.
-- When `Set-OutlookAnywhere` is planned, Apply is blocked if its resulting SSL requirement configuration would be rejected by Exchange (SSLOffloading is False while a side with a configured hostname does not require SSL). SSLOffloading itself is not changed by this script.
-- A change to a planned or accompanying target value after Preview blocks Apply. Clone also re-reads the source values used by the plan.
-- Within each target, Apply stops after the first failed command; the remaining operations are shown as `Not run`. Verification reports planned changes separately from Review Only differences.
-- With `-OutputFile`, the script generates a command or report file without applying configuration. Readiness BLOCKERs appear in the console; the command TXT does not include those BLOCKER messages.
-
-**Exit codes:** `0` for completed operations, cancellation, and completed exports (including exports that display readiness BLOCKERs); `1` for an Apply BLOCKER, mandatory pre-change backup failure, drift, Apply failure, or verification failure. For manual `-Backup`, review the per-server backup summary: an unsuccessful manual backup does not currently guarantee a nonzero exit code.
+- **Review:** Show the current Client Access configuration on one or more servers.
+- **Configure:** Set internal and external namespaces, with Preview and confirmation before changes.
+- **Interactive Configure:** Choose servers, components, and values through guided prompts.
+- **Clone:** Compare a source server with one or more targets. Add `-ApplyChanges` to apply eligible differences.
+- **Backup:** Save each server's configuration as JSON, with a readable TXT copy in the `ConfigBackups` folder by default.
+- **Restore:** Restore a JSON backup to the same server. Use Clone for server-to-server changes.
 
 ## Parameters
 
-| Parameter | Purpose |
+| Parameter | Description |
 |---|---|
-| `-Review` | Read-only review. Requires `-Server`. |
-| `-Backup` | JSON/TXT backup. Requires `-Server`. |
-| `-Restore` / `-BackupFile` | Same-server Restore from JSON. |
-| `-Interactive` | Guided Configure. |
-| `-Server` | One or more Exchange servers in Review, Backup, or Configure. |
-| `-SourceServer` / `-TargetServer` | Clone source and one or more targets. |
-| `-CompareOnly` | Explicit read-only Clone comparison; cannot combine with `-ApplyChanges`. |
-| `-ApplyChanges` | Enables Clone Apply; without it, Clone only compares. |
-| `-BackupPath` | Alternative backup location. |
-| `-InternalNamespace` / `-ExternalNamespace` | Configure namespace values. |
-| `-AutodiscoverSCPNamespace` | Configure Autodiscover SCP host. |
-| `-ClearExternalUrls` | Clear supported ExternalUrl values and OA ExternalHostname; exclusive with `-ExternalNamespace`. |
-| `-IncludeAuthentication` | Selected authentication settings in Clone/Restore; show authentication in Review. |
-| `-IncludePowerShellUrls` | Opt in to PowerShell InternalUrl/ExternalUrl. |
-| `-IncludeOutlookAnywhereSslRequirements` | Opt in to OA client SSL requirement values in Clone/Restore. |
-| `-OutlookAnywhereInternalClientsRequireSsl` / `-OutlookAnywhereExternalClientsRequireSsl` | Configure client SSL requirement values. |
-| `-OutlookAnywhereDefaultAuthenticationMethod` | Configure OA default authentication (Basic, Ntlm, Negotiate). |
-| `-OutputFile` | Export command/report file without changing Exchange. |
-| `-Help` | Built-in usage guide. |
+| `-Review` | Review configuration without making changes. Requires `-Server`. |
+| `-Backup` | Create a JSON backup and TXT report for each server. Requires `-Server`. |
+| `-Restore` | Restore configuration from a JSON backup to the same server. Requires `-BackupFile`. |
+| `-Interactive` | Start guided configuration. Optionally use `-Server` to specify servers. |
+| `-Server` | One or more Exchange servers for Review, Backup, Configure, or Interactive Configure. |
+| `-SourceServer` | Source Exchange server for Clone comparison. |
+| `-TargetServer` | One or more target Exchange servers for Clone. |
+| `-CompareOnly` | Explicit read-only Clone comparison; cannot be combined with `-ApplyChanges`. |
+| `-ApplyChanges` | Allow Clone to apply supported changes after Preview and confirmation. |
+| `-BackupFile` | JSON backup file used for same-server Restore. |
+| `-BackupPath` | Optional folder for manual backups. |
+| `-InternalNamespace` | Internal namespace for Configure. |
+| `-ExternalNamespace` | External namespace for Configure. |
+| `-AutodiscoverSCPNamespace` | Autodiscover SCP hostname for Configure. |
+| `-ClearExternalUrls` | Clear supported external URLs and Outlook Anywhere ExternalHostname in Configure; cannot be used with `-ExternalNamespace`. |
+| `-IncludeAuthentication` | Show authentication in Review or include supported authentication settings in Clone and Restore. |
+| `-IncludePowerShellUrls` | Include PowerShell internal and external URLs in Configure, Clone, or Restore. |
+| `-IncludeOutlookAnywhereSslRequirements` | Include Outlook Anywhere client SSL requirements in Clone or Restore. |
+| `-OutlookAnywhereInternalClientsRequireSsl` | Set the Outlook Anywhere internal client SSL requirement in Configure. |
+| `-OutlookAnywhereExternalClientsRequireSsl` | Set the Outlook Anywhere external client SSL requirement in Configure. |
+| `-OutlookAnywhereDefaultAuthenticationMethod` | Set the Outlook Anywhere default authentication method in Configure (`Basic`, `Ntlm`, or `Negotiate`). |
+| `-OutputFile` | Export commands or a report without applying configuration changes. |
+| `-Help` | Show the built-in usage guide. |
 
 ## Examples
 
-Read-only review:
+**Review two Exchange servers**
 
 ```powershell
 .\ExchangeURLManager.ps1 -Review -Server EX01,EX02
 ```
 
-Configure namespaces:
+**Configure internal and external namespaces**
 
 ```powershell
 .\ExchangeURLManager.ps1 -Server EX01,EX02 -InternalNamespace mail.contoso.com -ExternalNamespace mail.contoso.com -AutodiscoverSCPNamespace autodiscover.contoso.com
 ```
 
-Guided Configure:
+**Start Interactive Configure**
 
 ```powershell
 .\ExchangeURLManager.ps1 -Interactive
 ```
 
-Compare source and targets (read-only):
+**Compare a source server with two targets**
 
 ```powershell
 .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03
 ```
 
-Clone Apply after Preview and confirmation:
+**Apply the Clone plan after Preview and confirmation**
 
 ```powershell
 .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges
 ```
 
-Create backups:
+**Back up two servers**
 
 ```powershell
 .\ExchangeURLManager.ps1 -Backup -Server EX01,EX02
 ```
 
-Restore to the server named in the JSON backup:
+**Restore from a backup**
 
 ```powershell
 .\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\ExchangeURLManager-EX01-Manual.json
 ```
 
-Export Clone commands without applying:
+**Export required Clone commands without applying them**
 
 ```powershell
 .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02 -ApplyChanges -OutputFile C:\Temp\ExchangeURL-Commands.txt
 ```
 
-Built-in help and full PowerShell help:
+The backup filename in the Restore example is illustrative. Use the path to an actual JSON backup created by the script.
+
+For detailed PowerShell help:
 
 ```powershell
-.\ExchangeURLManager.ps1 -Help
 Get-Help .\ExchangeURLManager.ps1 -Full
 ```
 
-## Requirements
+## Supported settings
 
-- Exchange Server Mailbox environment, Exchange Management Shell, appropriate Exchange administrative permissions.
-- Windows PowerShell 5.1.
+- Internal and external URLs for OWA, ECP, EWS, MAPI, ActiveSync, and OAB.
+- Autodiscover SCP (`AutoDiscoverServiceInternalUri`) and Outlook Anywhere hostnames.
+- Optional authentication settings, PowerShell URLs, and Outlook Anywhere client SSL requirements when explicitly selected.
 
-Review the Preview and backup files before making production changes. Use at your own risk; see the script's caution and [LICENSE](LICENSE).
+Migration-sensitive settings, including ASA/Kerberos status, EWS MRSProxyEnabled, Outlook Anywhere SSLOffloading, PowerShell authentication/RequireSSL, and Extended Protection, remain **Review Only**. Outlook Anywhere settings refer to RPC over HTTP, not MAPI over HTTP.
 
-## Changelog
+The script does not configure certificates, IIS bindings, DNS records, firewalls, load balancers, SPNs, ASA credentials, or Extended Protection.
 
-See [CHANGELOG.md](CHANGELOG.md).
+## Safety
 
-## Feedback and issues
+- Changes are shown in Preview and require confirmation. The script creates a fresh JSON backup before Apply and verifies the result afterward.
+- Apply is blocked if a required backup fails, settings used by the plan change after Preview, or the proposed Exchange commands fail readiness checks. These include EWS DNS and Outlook Anywhere SSL checks.
+- Clone keeps source-server-specific values from being applied blindly to other servers. Authentication settings are not automatically copied between different Exchange builds.
+- If a command fails, remaining commands for that server are not run. The summary shows what succeeded, failed, or remains unchanged.
+- `-OutputFile` writes a report or command file without applying changes. Readiness BLOCKER messages are shown in the console, not in the exported command file.
 
-[GitHub Issues](https://github.com/Ceyhun-Kirmizitas/ExchangeURLManager.ps1/issues) | [Website](https://ceyhunkirmizitas.net/)
+Apply failures and BLOCKERs return exit code `1`. Completed exports return `0`, even when a readiness BLOCKER is shown. For manual `-Backup`, check the per-server results because a failed backup does not always return a nonzero exit code.
 
-## License
+## More information
 
-MIT. See [LICENSE](LICENSE).
+[Changelog](CHANGELOG.md) · [Report an issue](https://github.com/Ceyhun-Kirmizitas/ExchangeURLManager.ps1/issues) · [Website](https://ceyhunkirmizitas.net/) · [MIT License](LICENSE)
