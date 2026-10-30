@@ -1,281 +1,285 @@
-<#
+﻿<#
 .SYNOPSIS
-Reviews, configures, clones, backs up, or restores supported Exchange Server Client Access URL/namespace configuration.
+Reviews, configures, clones, backs up, and restores Exchange Server Client Access URLs and namespaces.
 
 .DESCRIPTION
-ExchangeURLManager.ps1 provides five Manager operations plus an explicit guided Interactive Configure mode.
+ExchangeURLManager.ps1 reviews, configures, clones, backs up, and restores Exchange Server Client Access URLs and namespaces. It is intended for new deployments, side-by-side migrations, server replacement, and day-to-day review.
 
-1. Review mode
-   Use -Review with -Server to display the current supported Client Access configuration.
-   Review is read-only. A server-specific discovery failure does not stop the remaining servers where practical.
+Modes
+- Review (-Review): reads the supported Client Access configuration from one or more servers. Read-only. Authentication details are shown only with -IncludeAuthentication. If one server cannot be read, the other servers are still reviewed.
+- Configure (default): sets the internal, external, and Autodiscover SCP namespaces from parameters or prompts. If -Server is omitted, the local server is used. Authentication is not changed unless an Outlook Anywhere authentication parameter is used.
+- Interactive Configure (-Interactive): guided Configure. Choose Common namespace, Select components, or Advanced per-component configuration. In Advanced mode, each URL or hostname component is set to Internal only, External only, Both, or Skip. It uses the same Preview and Apply steps as Configure.
+- Clone (-SourceServer, -TargetServer): compares a live source server with one or more target servers. Read-only by default; -CompareOnly states this explicitly. Add -ApplyChanges to apply the source values after Preview and confirmation.
+- Backup (-Backup): saves one versioned JSON backup per server and a TXT copy for reading. Read-only. The default folder is ConfigBackups next to the script. Secrets, passwords, certificate private keys, and ASA credentials are not exported.
+- Restore (-Restore, -BackupFile): restores a JSON backup to the same server. Cross-server Restore is blocked; use Clone for server-to-server migration.
 
-2. Configure mode
-   Run without -SourceServer or another mode switch. Internal, external, and Autodiscover SCP namespaces can be supplied as parameters or entered interactively.
-   If -Server is omitted, the local computer is used. Authentication settings are not changed by default; Outlook Anywhere authentication changes require the explicit supported Configure parameter.
-   Use -ClearExternalUrls to remove supported external URLs/hostnames.
-   Use -IncludePowerShellUrls to include PowerShell InternalUrl/ExternalUrl only.
-   Each PowerShell URL keeps its current HTTP/HTTPS scheme; HTTP is used when the current scheme cannot be read.
-   Outlook Anywhere (RPC over HTTP) SSL requirements and DefaultAuthenticationMethod can be changed only when their explicit parameters are supplied.
+Supported settings
+- InternalUrl and ExternalUrl for OWA, ECP, EWS, MAPI, ActiveSync, and OAB.
+- Autodiscover SCP (AutoDiscoverServiceInternalUri).
+- Outlook Anywhere (RPC over HTTP) InternalHostname and ExternalHostname.
+- Only with their switches: authentication settings, including OWA LogonFormat and DefaultDomain (-IncludeAuthentication); PowerShell InternalUrl and ExternalUrl (-IncludePowerShellUrls); Outlook Anywhere InternalClientsRequireSsl and ExternalClientsRequireSsl (-IncludeOutlookAnywhereSslRequirements).
+- Review Only (shown, never changed): ASA/Kerberos, EWS MRSProxyEnabled, Outlook Anywhere SSLOffloading, PowerShell authentication and RequireSSL, and Extended Protection.
+- Outlook Anywhere settings apply only to the legacy RPC over HTTP /rpc endpoint. MAPI over HTTP is configured through the MAPI virtual directory.
 
-3. Clone mode
-   Use -SourceServer with -TargetServer. The default behavior is a read-only source/target comparison; no Exchange configuration changes are made.
-   Add -CompareOnly when you want to state the read-only intent explicitly.
-   Add -ApplyChanges explicitly to enter Clone / Apply mode.
-   -CompareOnly and -ApplyChanges cannot be used together.
-   Add -IncludeAuthentication to include supported authentication settings from the source server, including OWA LogonFormat and DefaultDomain.
-   Add -IncludeOutlookAnywhereSslRequirements to copy Outlook Anywhere (RPC over HTTP) InternalClientsRequireSsl and ExternalClientsRequireSsl explicitly during Apply.
-   Add -IncludePowerShellUrls to include only PowerShell InternalUrl/ExternalUrl during Apply.
-   Source URL/hostname/SCP values that directly reference the source Exchange server Name/FQDN remain Review Only and are not applied automatically.
-   Short name and FQDN forms of the same Exchange server are treated as the same server for Clone source/target and duplicate-target checks.
-   Authentication settings are Apply-capable only when the source and target servers run the same Exchange build and the current EMS exposes the setting; otherwise they remain Review Only instead of entering the Apply plan.
-   For Clone Apply with -IncludeAuthentication, run the script from Exchange Management Shell on a server that matches the target Exchange build.
-   At an interactive console, long comparison output is paged according to the current console height without splitting a setting/result block. Press ENTER to continue or Q to exit.
+Clone
+- Authentication settings are applied only when the source and target run the same Exchange build. Otherwise they stay Review Only. For Clone Apply with -IncludeAuthentication, run the script from Exchange Management Shell on a server with the target build.
+- Values that use the source server name, for example https://EX01.contoso.com/owa, are Review Only. For InternalUrl, Autodiscover SCP, and the Outlook Anywhere InternalHostname, a value is shown as "In sync (target-specific)" when the target already uses its own server name in the same place. No URL is changed for this.
+- A short name and an FQDN of the same server count as the same server.
+- Long comparison output is paged by console height. Press ENTER to continue or Q to exit.
 
-4. Backup mode
-   Use -Backup with -Server to create one versioned JSON backup per server plus a human-readable TXT companion.
-   Backups are read-only and contain the supported Apply-capable values plus Review Only visibility data.
-   Secrets, passwords, SecureStrings, certificate private keys, and ASA credential material are not exported.
-   The default location is ConfigBackups under the script folder. -BackupPath can specify a directory or, for a single server, a .json file.
+Safety
+- Configure, Interactive Configure, Restore, and Clone with -ApplyChanges follow the same steps: Preview, confirmation, fresh pre-change JSON backup, Apply, and verification.
+- Apply does not start if the pre-change backup cannot be created.
+- Before Apply, the target is read again. Apply stops if a planned setting, a value sent with a Set-* command, or the generated command changed after Preview. In Clone, the source values used by the plan are read again too.
+- Every generated Set-* command, including required companion parameters, is checked against the current Exchange Management Shell. A missing cmdlet or parameter is a BLOCKER.
+- A proposed EWS hostname that cannot be resolved in DNS blocks Apply.
+- Preview shows the Outlook Anywhere SSL settings that will be in place after Apply.
+- When Set-OutlookAnywhere is planned, Apply is blocked if Exchange would reject
+  the resulting SSL settings (SSLOffloading is False and a configured hostname
+  side does not require SSL). The script does not change SSLOffloading.
+- On each server, Apply stops after the first failed command. The Apply summary lists each command as Applied, Failed, or Not run.
+- Verification checks the planned changes again. Review Only differences are listed separately and do not affect the result.
+- With -OutputFile, Configure, Interactive Configure, Restore, and Clone with -ApplyChanges export the required Set-* commands and change nothing. Review writes its report, and the Clone comparison writes the comparison report.
+- Not handled by this script: certificates and private keys, IIS bindings, firewall/NAT, load balancers, DNS records, ASA credential deployment, SPNs, and Extended Protection changes.
 
-5. Restore mode
-   Use -Restore with -BackupFile to build a same-server restore plan from an ExchangeURLManager JSON backup.
-   Cross-server restore is intentionally blocked; use Clone for server-to-server migration.
-   URL/hostname settings are restored by default.
-   Authentication, PowerShell URLs, and Outlook Anywhere SSL requirements require their explicit opt-in switches.
-   Review Only values from the backup remain visible but are never applied automatically.
-
-Interactive Configure
-   Use -Interactive for guided field configuration.
-   Interactive mode collects server/component/value selections only; it uses the same Compare -> Preview -> Confirm -> JSON backup -> Apply -> Verify engine as normal Configure.
-   Common namespace, component-selection, and advanced per-component styles are available.
-   Advanced mode uses 1=Internal only, 2=External only, 3=Both, 4=Skip for every dual-sided URL/hostname component.
-
-Outlook Anywhere settings apply only to the legacy RPC over HTTP /rpc endpoint.
-MAPI over HTTP is managed separately through the MAPI virtual directory.
-
-Configure, Clone / Apply, and Restore use:
-Discover -> Snapshot current state -> Build desired state -> Compare -> Preview -> Confirm -> fresh pre-change JSON restore backup -> Apply -> Verify.
-
-Clone is read-only by default. -CompareOnly can be used as an explicit read-only intent switch.
-The Apply path is available only when -ApplyChanges is explicitly supplied.
--CompareOnly and -ApplyChanges are mutually exclusive.
-
-A real Apply is blocked if the fresh pre-change JSON backup cannot be created.
-Apply is also blocked when the configuration read for the fresh pre-change backup no longer matches the Preview. Run the script again to review a new Preview.
-Before -OutputFile export or Apply, every generated Set-* command, including required companion parameters, is checked against the current Exchange Management Shell. A cmdlet or parameter that is not available is a BLOCKER.
-The manual Backup mode and automatic pre-change backup use the same versioned JSON schema.
-
-When -OutputFile is specified in Configure, Clone / Apply, or Restore, no Exchange changes are applied and only required Set-* commands are exported.
-With the default read-only Clone comparison, -OutputFile writes the comparison report.
-With Review, -OutputFile writes the read-only review report.
-
-The script does not manage certificates/private keys, IIS bindings, firewall/NAT, load balancer configuration, DNS records, ASA credential deployment, SPNs, or Extended Protection changes.
+Exit codes
+- 0 = completed, read-only Preview or comparison, command export, or cancelled by the operator. A command export that completes returns 0 even when readiness BLOCKERs (EWS DNS or Outlook Anywhere SSL) are reported.
+- 1 = BLOCKER, required pre-change backup failure, drift, Apply failure, or verification failure.
 
 .PARAMETER Interactive
-Runs guided Interactive Configure mode. The script collects server/component/value choices and then uses the normal Configure planning/apply engine.
+Runs Interactive Configure. The script asks for servers, components, and values, then uses the same Preview and Apply steps as Configure.
 
 .PARAMETER Review
-Runs read-only Review mode. Requires Server.
+Runs the read-only Review mode. Requires -Server.
 
 .PARAMETER Backup
-Runs read-only Backup mode. Requires Server.
+Runs the read-only Backup mode. Requires -Server.
 
 .PARAMETER Restore
-Runs Restore mode. Requires BackupFile.
+Runs Restore mode. Requires -BackupFile.
 
 .PARAMETER SourceServer
-Reference Exchange server. Valid only in Clone mode.
+Source Exchange server for Clone.
 
 .PARAMETER Server
 One or more Exchange servers for Review, Backup, Configure, or Interactive Configure.
-Required in Review and Backup modes. Optional in Configure and Interactive modes; if omitted, the local computer is used.
+Required in Review and Backup. In Configure and Interactive, the local server is used when it is omitted.
 
 .PARAMETER TargetServer
-One or more target Exchange servers. Required only in Clone mode.
-Each target server must be specified only once. Duplicate target entries are blocked before Exchange Management Shell initialization.
-After Exchange resolution, short name and FQDN forms of the same server are treated as the same Exchange server.
-A target that resolves to the source server or to another target is blocked.
+One or more target Exchange servers for Clone.
+Each target can be listed only once; duplicates are blocked before Exchange Management Shell is loaded.
+A short name and an FQDN of the same server count as the same server. A target that is the source server or another target is blocked.
 
 .PARAMETER BackupFile
-ExchangeURLManager JSON backup used by Restore mode.
-The target server is read from the backup and must match the live Exchange server identity.
+JSON backup created by ExchangeURLManager.ps1, used by Restore.
+The server name in the backup must match the live Exchange server.
 A relative path is resolved from the current PowerShell location.
 
 .PARAMETER BackupPath
-Optional Backup-mode output path.
-For multiple servers, specify a directory.
-For one server, specify either a directory or a .json filename.
+Backup output path.
+For several servers, specify a folder. For one server, specify a folder or a .json file name.
 Existing files are never overwritten.
 
 .PARAMETER IncludeAuthentication
-Includes supported authentication settings in Clone or Restore.
-In Review mode, authentication settings are hidden by default and are displayed only when this switch is used.
-PowerShell authentication remains Review Only.
+Includes authentication settings in Clone or Restore.
+In Review, authentication settings are shown only with this switch.
+PowerShell authentication stays Review Only.
 
 .PARAMETER CompareOnly
-Explicitly requests the read-only Clone comparison.
-This switch is optional because SourceServer + TargetServer already defaults to read-only comparison.
-It cannot be used together with -ApplyChanges.
+States the read-only Clone comparison explicitly. Optional, because Clone without -ApplyChanges is already read-only.
+Cannot be used with -ApplyChanges.
 
 .PARAMETER ApplyChanges
-Explicitly enables the Clone Apply path.
-Without this switch, SourceServer + TargetServer always runs a read-only comparison and no Exchange configuration changes are made.
-It cannot be used together with -CompareOnly.
-When -OutputFile is used together with -ApplyChanges, required Set-* commands are exported and no Exchange configuration changes are applied.
+Applies the Clone plan after Preview and confirmation. Without it, Clone only compares.
+Cannot be used with -CompareOnly.
+With -OutputFile, the required Set-* commands are exported and nothing is changed.
 
 .PARAMETER InternalNamespace
-Internal Client Access namespace for Configure mode. If omitted, the script prompts for it.
-Specify a DNS host name such as mail.contoso.com. A URL is reduced to its host name; an invalid host name, for example one with a port, is rejected before Preview.
+Internal Client Access namespace for Configure. The script prompts for it when it is omitted.
+Use a DNS host name such as mail.contoso.com. A URL is reduced to its host name; an invalid host name, for example one with a port, is rejected before Preview.
 
 .PARAMETER ExternalNamespace
-External Client Access namespace for Configure mode. If omitted, the script prompts and defaults to InternalNamespace.
-Use the same host name format as InternalNamespace.
+External Client Access namespace for Configure. When it is omitted, the script prompts and suggests the internal namespace.
+Use the same host name format as -InternalNamespace.
 
 .PARAMETER ClearExternalUrls
-Explicitly clears supported ExternalUrl values and Outlook Anywhere (RPC over HTTP) ExternalHostname in Configure mode.
-Cannot be used together with -ExternalNamespace.
+Clears the ExternalUrl values and the Outlook Anywhere (RPC over HTTP) ExternalHostname in Configure.
+Cannot be used with -ExternalNamespace.
 
 .PARAMETER IncludePowerShellUrls
-Explicitly includes PowerShell InternalUrl/ExternalUrl in Configure, Clone, or Restore.
-PowerShell authentication, RequireSSL, and Extended Protection remain Review Only.
-In Configure, each PowerShell URL keeps its current HTTP/HTTPS scheme; HTTP is used when the current scheme cannot be read.
+Includes PowerShell InternalUrl and ExternalUrl in Configure, Clone, or Restore.
+PowerShell authentication, RequireSSL, and Extended Protection stay Review Only.
+In Configure, each PowerShell URL keeps its current HTTP or HTTPS scheme; HTTP is used when the current scheme cannot be read.
 
 .PARAMETER IncludeOutlookAnywhereSslRequirements
-Explicitly includes Outlook Anywhere (RPC over HTTP) InternalClientsRequireSsl and ExternalClientsRequireSsl in Clone or Restore.
-If omitted, the target server's current SSL requirement values are preserved.
+Includes Outlook Anywhere (RPC over HTTP) InternalClientsRequireSsl and ExternalClientsRequireSsl in Clone or Restore.
+Without it, the target's current values are kept.
 
 .PARAMETER OutlookAnywhereInternalClientsRequireSsl
-Optional Configure-mode Boolean value for Outlook Anywhere (RPC over HTTP) InternalClientsRequireSsl.
-If omitted, the current server value is preserved.
+Configure only. Sets Outlook Anywhere (RPC over HTTP) InternalClientsRequireSsl ($true or $false).
+When it is omitted, the current value is kept.
 
 .PARAMETER OutlookAnywhereExternalClientsRequireSsl
-Optional Configure-mode Boolean value for Outlook Anywhere (RPC over HTTP) ExternalClientsRequireSsl.
-If omitted, the current server value is preserved.
+Configure only. Sets Outlook Anywhere (RPC over HTTP) ExternalClientsRequireSsl ($true or $false).
+When it is omitted, the current value is kept.
 
 .PARAMETER OutlookAnywhereDefaultAuthenticationMethod
-Optional Configure-mode Outlook Anywhere (RPC over HTTP) DefaultAuthenticationMethod.
-Valid values: Basic, Ntlm, Negotiate.
-If omitted, Outlook Anywhere (RPC over HTTP) authentication is not changed.
+Configure only. Sets the Outlook Anywhere (RPC over HTTP) DefaultAuthenticationMethod: Basic, Ntlm, or Negotiate.
+This also sets InternalClientAuthenticationMethod, ExternalClientAuthenticationMethod, and IISAuthenticationMethods.
+When it is omitted, Outlook Anywhere authentication is not changed.
 
 .PARAMETER AutodiscoverSCPNamespace
-Autodiscover SCP namespace for Configure mode. If omitted, the script prompts with a suggested value.
-Use the same host name format as InternalNamespace.
+Autodiscover SCP namespace for Configure. When it is omitted, the script prompts with a suggested value.
+Use the same host name format as -InternalNamespace.
 
 .PARAMETER OutputFile
-Optional TXT output path.
-Review writes a read-only report.
-Configure/Interactive/Clone/Restore export required Set-* commands without applying changes.
-Default Clone comparison writes the read-only comparison report.
-Clone / Apply with -OutputFile exports required Set-* commands without applying them.
+TXT output path.
+Review: saves the report.
+Clone without -ApplyChanges: saves the comparison report.
+Configure, Interactive Configure, Restore, and Clone with -ApplyChanges: export the required Set-* commands. Nothing is changed.
 
 .PARAMETER Help
-Displays a short usage guide and exits without initializing Exchange Management Shell or making changes.
+Shows a short usage guide and exits. Exchange Management Shell is not loaded and nothing is changed.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Review -Server EX01
-Reviews the current supported Client Access configuration on EX01. No changes are applied.
+Reviews the Client Access configuration on EX01. No changes are made.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Review -Server EX01,EX02 -OutputFile C:\Temp\ExchangeURL-Review.txt
-Reviews EX01 and EX02 and writes the same read-only report to a TXT file.
+Reviews EX01 and EX02 and saves the report to a TXT file.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Interactive
-Starts guided Interactive Configure. Choose Common namespace, Select components, or Advanced per-component configuration.
+Starts Interactive Configure for the local server.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Interactive -Server EX01,EX02
-Starts guided Interactive Configure for EX01 and EX02. Advanced mode shows current values for both servers before each component choice.
+Starts Interactive Configure for EX01 and EX02. Advanced mode shows the current values of both servers for each component.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1
-Prompts for namespaces, previews the required changes for the local Exchange server, asks for confirmation, creates a JSON pre-change backup, applies the changes, and verifies the result.
+Prompts for the namespaces and configures the local server after Preview, confirmation, and a pre-change backup.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Server EX01,EX02 -InternalNamespace mail.contoso.com -ExternalNamespace mail.contoso.com -AutodiscoverSCPNamespace autodiscover.contoso.com
-Applies URL/hostname changes to EX01 and EX02 without changing authentication.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -IncludeAuthentication
-Displays all URL/hostname and supported authentication values for EX01 versus EX02 and EX03. No changes are applied.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -CompareOnly -IncludeAuthentication
-Explicitly requests the same read-only source/target comparison. No changes are applied.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges -IncludeAuthentication
-Aligns URL/hostname settings on EX02 and EX03 with EX01 after Preview, confirmation, and successful pre-change backup creation.
-Supported authentication settings are included only for targets that run the same Exchange build as EX01; otherwise they remain Review Only.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -Backup -Server EX01,EX02
-Creates one versioned JSON backup per server under ConfigBackups plus a human-readable TXT companion.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -Backup -Server EX01 -BackupPath C:\Temp\EX01-ExchangeURL.json
-Creates a single-server JSON backup at the specified path plus a human-readable TXT companion.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\EX01-ExchangeURL.json
-Restores supported URL/hostname settings to the same server identified by the backup after preview and confirmation.
-
-.EXAMPLE
-.\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\EX01-ExchangeURL.json -IncludeAuthentication -IncludePowerShellUrls -IncludeOutlookAnywhereSslRequirements
-Restores supported URL/hostname settings and explicitly includes supported authentication, PowerShell URLs, and Outlook Anywhere SSL requirements.
+Sets the URLs, Outlook Anywhere hostnames, and Autodiscover SCP on EX01 and EX02. Authentication is not changed.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -Server EX01 -InternalNamespace mail.contoso.com -ClearExternalUrls
-Configures the internal namespace and clears supported external URLs/hostnames.
+Sets the internal namespace and clears the external URLs and the Outlook Anywhere ExternalHostname.
 
 .EXAMPLE
-.\ExchangeURLManager.ps1 -Server EX01 -InternalNamespace mail.contoso.com -ExternalNamespace mail.contoso.com -OutlookAnywhereInternalClientsRequireSsl $true -OutlookAnywhereExternalClientsRequireSsl $true -OutlookAnywhereDefaultAuthenticationMethod Ntlm
-Configures namespaces and explicitly aligns Outlook Anywhere (RPC over HTTP) SSL requirements and default authentication.
+.\ExchangeURLManager.ps1 -Server EX01 -InternalNamespace mail.contoso.com -ExternalNamespace mail.contoso.com -OutlookAnywhereInternalClientsRequireSsl $true -OutlookAnywhereExternalClientsRequireSsl $true -OutlookAnywhereDefaultAuthenticationMethod Negotiate
+Sets the namespaces and also the Outlook Anywhere SSL requirements and default authentication.
 
+.EXAMPLE
+.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03
+Compares EX02 and EX03 with EX01. Read-only.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -IncludeAuthentication
+Compares EX02 and EX03 with EX01, including authentication settings. Read-only.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges
+Applies the EX01 URL and hostname values to EX02 and EX03 after Preview, confirmation, and a pre-change backup.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges -IncludeAuthentication
+Also applies authentication settings, but only to targets with the same Exchange build as EX01. For other targets they stay Review Only.
 
 .EXAMPLE
 .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02 -ApplyChanges -OutputFile C:\Temp\ExchangeURL-Commands.txt
-Builds the Clone Apply plan and exports only required Set-* commands for manual review. No Exchange configuration changes are applied.
+Exports the Set-* commands of the Clone plan for manual review. Nothing is changed.
 
 .EXAMPLE
-.\ExchangeURLManager.ps1 -Help
-Displays the short built-in usage guide and exits without initializing Exchange Management Shell or making changes.
+.\ExchangeURLManager.ps1 -Backup -Server EX01,EX02
+Saves one JSON backup and a TXT copy per server in the ConfigBackups folder.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -Backup -Server EX01 -BackupPath C:\Temp\EX01-ExchangeURL.json
+Saves the EX01 backup to the given file, plus a TXT copy.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\EX01-ExchangeURL.json
+Restores the URL and hostname settings from the backup to the same server after Preview and confirmation.
+
+.EXAMPLE
+.\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\EX01-ExchangeURL.json -IncludeAuthentication -IncludePowerShellUrls -IncludeOutlookAnywhereSslRequirements
+Also restores authentication settings, PowerShell URLs, and Outlook Anywhere SSL requirements.
 
 .NOTES
 Author        : Ceyhun Kirmizitas
-Version       : 1.0
-Date          : 02/10/2026
-Applies to    : Exchange Server Mailbox servers
-Compatibility : Intended for Exchange Server 2016, Exchange Server 2019, and Exchange Server Subscription Edition.
-Validated     : Live lab validation performed on Exchange build 15.2.1748.10 (Mailbox role) using Windows PowerShell 5.1.
-                Mixed-build Clone authentication behavior was not runtime-validated.
-Version gate  : None; no hard Exchange-version gate is enforced.
+Version       : 1.1
+Date          : 2026-10-30
+Applies to    : Exchange Server (Mailbox role)
+Compatibility : Exchange Server 2016, Exchange Server 2019, and Exchange Server Subscription Edition
 Shell         : Windows PowerShell 5.1
 Website       : https://ceyhunkirmizitas.net
 GitHub        : https://github.com/Ceyhun-Kirmizitas
 LinkedIn      : https://www.linkedin.com/in/ceyhun-kirmizitas/
 
-Change Log
+Migration safety model
+- Apply: settings the script can change after Preview and confirmation.
+- Review Only: settings that matter during migration but are never changed automatically.
+- Out of scope: settings this script does not handle.
+
+Change log
 ----------
-1.0 - 02/10/2026
-      Initial ExchangeURLManager release.
-      Provides Review, Configure, Interactive Configure, Clone, Backup, and Restore modes.
-      Uses versioned JSON backups for manual Backup and automatic pre-change recovery.
-      Keeps authentication, PowerShell URL, and Outlook Anywhere SSL migration behind explicit opt-in controls where required.
-      Keeps ASA/Kerberos, EWS MRS Proxy, Outlook Anywhere SSL offloading, PowerShell authentication/RequireSSL, and other migration-sensitive settings Review Only. SSL offloading is explicitly called out as incompatible with Windows Extended Protection and Hybrid Modern Authentication; SSL Bridging requires topology and certificate review.
-      ASA status discovery is isolated from normal Client Access discovery so an optional ASA read failure does not stop URL/namespace operations.
-      Outlook Anywhere is treated separately from MAPI over HTTP; its SSL/authentication settings apply only to the legacy /rpc endpoint.
-      Clone keeps source-server-specific URL/hostname/SCP values Review Only when they directly reference the source Exchange server Name/FQDN.
-      Clone canonicalizes Exchange server identity so short-name/FQDN aliases cannot bypass source-vs-target or duplicate-target protection.
-      Apply rechecks the fresh pre-change snapshot and blocks if the Set-* commands differ from Preview, preventing stale companion values from being re-sent.
-      Clone authentication is Apply-capable only when the source and target run the same Exchange build; generated Set-* commands, including companion parameters, are validated against the current Exchange Management Shell before export or Apply.
+1.1 - 2026-10-30
 
-Migration safety model:
-- Apply: settings that the tool can safely align after preview/confirmation.
-- Review Only: settings that are important during migration but are not changed automatically.
-- Skip: settings outside this script's scope.
+Changes
+- BLOCKER, required pre-change backup, drift, Apply, and verification
+  failures now end with exit code 1.
+- Apply is blocked when Exchange would reject the Outlook Anywhere SSL
+  settings: SSL offloading is off and a side that has a hostname does
+  not require SSL. The script does not change these SSL settings.
 
-The script does not manage certificates, private keys, IIS bindings, firewall/NAT, load balancers, DNS records, ASA credential deployment, SPNs, or Extended Protection changes.
+Improvements
+- Clone shows source values that already use the target's own server
+  name as "In sync (target-specific)" instead of Review Only.
+- Preview shows the Outlook Anywhere SSL settings that will be in place
+  after Apply.
+- Verification reports planned changes and Review Only differences
+  separately. Apply results are listed per command as Applied, Failed,
+  or Not run.
+- Review Only values in Preview are labeled "Reference" instead of "New".
+- Simpler help, examples, and console messages, and the
+  Feedback / Bugs / Contact footer.
+
+Bug Fixes
+- Fixed target changes made after Preview not being detected when the
+  generated Set-* command stayed the same.
+- Fixed Clone not detecting source changes made after Preview.
+
+1.0 - 2026-10-02
+
+New Features
+- Initial release with Review, Configure, Interactive Configure, Clone,
+  Backup, and Restore modes.
+- Versioned JSON backups for manual Backup and automatic pre-change
+  backups.
+- Opt-in switches for authentication, PowerShell URLs, and Outlook
+  Anywhere SSL settings.
+- Migration-sensitive settings stay Review Only: ASA/Kerberos, EWS MRS
+  Proxy, Outlook Anywhere SSL offloading, and PowerShell authentication
+  and RequireSSL. SSL offloading is flagged as not supported with
+  Windows Extended Protection and Hybrid Modern Authentication; SSL
+  Bridging needs topology and certificate review.
+- ASA status is read separately, so an ASA read failure does not stop
+  URL and namespace operations.
+- Outlook Anywhere is handled separately from MAPI over HTTP; its SSL
+  and authentication settings apply only to the legacy /rpc endpoint.
+- Clone keeps values that use the source server name Review Only.
+- Clone treats a short name and an FQDN of the same server as the same
+  server in source and target checks.
+- Apply reads the target again before changes and stops if the Set-*
+  commands differ from Preview.
+- Clone authentication is applied only between servers with the same
+  Exchange build. Generated Set-* commands, including companion
+  parameters, are checked against the current Exchange Management Shell
+  before export or Apply.
 
 License
 -------
@@ -390,40 +394,35 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $script:ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:PublicScriptName = 'ExchangeURLManager.ps1'
-$script:PublicScriptVersion = '1.0'
+$script:PublicScriptVersion = '1.1'
 
 if ($Help) {
     $helpPages = @(
 @"
 ExchangeURLManager.ps1
-Exchange Server Client Access URL / namespace manager
+Exchange Server Client Access URL and namespace manager
 
 HELP 1/4 - MODES
+
+  Review (read-only):
+    .\ExchangeURLManager.ps1 -Review -Server EX01,EX02
 
   Interactive Configure:
     .\ExchangeURLManager.ps1 -Interactive
 
-  Review:
-    .\ExchangeURLManager.ps1 -Review -Server EX01,EX02
-
   Configure:
-    .\ExchangeURLManager.ps1 -Server EX01,EX02 `
-      -InternalNamespace mail.contoso.com `
-      -ExternalNamespace mail.contoso.com
+    .\ExchangeURLManager.ps1 -Server EX01,EX02 -InternalNamespace mail.contoso.com -ExternalNamespace mail.contoso.com
 
-  Clone comparison (default, read-only):
+  Clone comparison (read-only, default):
     .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03
-
-  Clone comparison (explicit):
-    .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -CompareOnly
 
   Clone Apply:
     .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges
 
-  Backup:
+  Backup (read-only):
     .\ExchangeURLManager.ps1 -Backup -Server EX01,EX02
 
-  Restore:
+  Restore (same server only):
     .\ExchangeURLManager.ps1 -Restore -BackupFile C:\Temp\EX01-ExchangeURL.json
 "@,
 @"
@@ -441,62 +440,48 @@ HELP 2/4 - INTERACTIVE CONFIGURE
     1. Internal only
     2. External only
     3. Both
-    4. Skip
-
-  Default:
-    4 = Skip
+    4. Skip (default)
 
   Value entry:
     Enter = keep current
-    NONE  = clear the selected supported value
+    NONE  = clear the selected value
 
-  Multi-server mode shows current values for each server.
-
+  With several servers, current values are shown for each server.
   PowerShell URLs are never selected automatically.
 "@,
 @"
 HELP 3/4 - SAFETY
 
   Review and Backup are read-only.
+  Clone is read-only unless -ApplyChanges is used.
+  -CompareOnly and -ApplyChanges cannot be used together.
 
-  Configure / Interactive / Restore and Clone with -ApplyChanges:
-    Preview
-      -> Confirm
-      -> JSON pre-change backup
-      -> Apply
-      -> Verify
-    Configuration changed after Preview = BLOCKER before Apply
+  Configure, Interactive, Restore, and Clone with -ApplyChanges:
+    Preview -> Confirm -> pre-change JSON backup -> Apply -> Verify
+    Changes on the target (or Clone source) after Preview = BLOCKER
 
-  Clone safety default:
-    SourceServer + TargetServer = read-only comparison
-    -CompareOnly                = explicit read-only intent
-    -ApplyChanges               = explicit Clone Apply opt-in
-    CompareOnly + ApplyChanges  = BLOCKER
-    Duplicate TargetServer      = BLOCKER before Exchange Management Shell initialization
-    Short name + FQDN of same server = same Exchange server after resolution
-    Source-server-specific URL/hostname/SCP values = Review Only
-    Clone authentication Apply: use EMS matching the target Exchange build
+  Clone:
+    Duplicate or same-as-source targets = BLOCKER
+    Values with the source server name = Review Only
+    Target already uses its own name   = In sync (target-specific), no change
+    Authentication is applied only between servers with the same build
 
-  Restore safety:
-    Restore is same-server only. Use Clone for server-to-server migration.
+  Restore is same-server only. Use Clone for server-to-server migration.
 
-  -OutputFile:
-    Exports/reports only. No Exchange configuration is changed.
+  -OutputFile exports commands or reports. Nothing is changed.
 
-  Parameter-mode explicit opt-ins:
+  Opt-in switches:
     -IncludeAuthentication
     -IncludePowerShellUrls
     -IncludeOutlookAnywhereSslRequirements
 
-  Interactive uses explicit menu selections. PowerShell URLs are not selected by default.
+  Review Only (never changed):
+    ASA / Kerberos, EWS MRSProxyEnabled, Outlook Anywhere SSLOffloading,
+    PowerShell authentication and RequireSSL, Extended Protection
 
-  Review Only:
-    ASA / Kerberos
-    EWS MRSProxyEnabled
-    Outlook Anywhere SSLOffloading
-    PowerShell authentication
-    PowerShell RequireSSL
-    Extended Protection
+  Exit codes:
+    0 = completed, Preview, export, or cancelled
+    1 = BLOCKER, backup failure, drift, Apply failure, or verification failure
 "@,
 @"
 HELP 4/4 - EXAMPLES
@@ -504,27 +489,20 @@ HELP 4/4 - EXAMPLES
   Interactive for selected servers:
     .\ExchangeURLManager.ps1 -Interactive -Server EX01,EX02
 
-  Interactive command export:
-    .\ExchangeURLManager.ps1 -Interactive -Server EX01,EX02 `
-      -OutputFile C:\Temp\ExchangeURL-Commands.txt
+  Export commands instead of applying them:
+    .\ExchangeURLManager.ps1 -Interactive -Server EX01,EX02 -OutputFile C:\Temp\ExchangeURL-Commands.txt
 
-  Clone comparison (default):
-    .\ExchangeURLManager.ps1 -SourceServer EX01 `
-      -TargetServer EX02,EX03 -IncludeAuthentication
+  Clone comparison including authentication:
+    .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -IncludeAuthentication
 
-  Clone comparison (explicit):
-    .\ExchangeURLManager.ps1 -SourceServer EX01 `
-      -TargetServer EX02,EX03 -CompareOnly -IncludeAuthentication
+  Clone Apply including authentication:
+    .\ExchangeURLManager.ps1 -SourceServer EX01 -TargetServer EX02,EX03 -ApplyChanges -IncludeAuthentication
 
-  Clone Apply:
-    .\ExchangeURLManager.ps1 -SourceServer EX01 `
-      -TargetServer EX02,EX03 -ApplyChanges -IncludeAuthentication
-
-  Comparison console paging:
+  Comparison paging:
     Press ENTER to continue or Q to exit.
-    Paging is disabled when -OutputFile is used or interactive input is unavailable.
+    Paging is off when -OutputFile is used or the console is not interactive.
 
-  Full comment-based help:
+  Full help:
     Get-Help .\ExchangeURLManager.ps1 -Full
 "@
     )
@@ -545,14 +523,34 @@ HELP 4/4 - EXAMPLES
 # Startup Summary / Operator Context
 # ---------------------------------------------------------------------------
 function Show-FeedbackFooter {
-    Write-Host ''
-    Write-Host '############################################' -ForegroundColor Cyan
-    Write-Host '# Feedback / Bugs' -ForegroundColor Cyan
-    Write-Host '############################################' -ForegroundColor Cyan
-    Write-Host 'For updates, feedback, bugs, and feature requests:'
-    Write-Host 'https://github.com/Ceyhun-Kirmizitas' -ForegroundColor DarkGray
-    Write-Host 'https://ceyhunkirmizitas.net' -ForegroundColor DarkGray
-    Write-Host '############################################' -ForegroundColor Cyan
+    # Standard footer for all Exchange scripts: 58-character separators.
+    # Colors: separators, heading, and the leading '# ' Cyan; labels White; URLs Gray.
+    $footerSeparator = '##########################################################'
+    $footerLines = @(
+        '',
+        $footerSeparator,
+        '# Feedback / Bugs / Contact',
+        $footerSeparator,
+        '# GitHub  : https://github.com/Ceyhun-Kirmizitas',
+        '# Website : https://ceyhunkirmizitas.net',
+        '# LinkedIn: https://www.linkedin.com/in/ceyhun-kirmizitas/',
+        $footerSeparator
+    )
+
+    foreach ($footerLine in $footerLines) {
+        $urlIndex = $footerLine.IndexOf('https://')
+        if ($footerLine -eq $footerSeparator -or $footerLine -eq '# Feedback / Bugs / Contact') {
+            Write-Host $footerLine -ForegroundColor Cyan
+        }
+        elseif ($urlIndex -gt 2) {
+            Write-Host '# ' -ForegroundColor Cyan -NoNewline
+            Write-Host $footerLine.Substring(2, $urlIndex - 2) -ForegroundColor White -NoNewline
+            Write-Host $footerLine.Substring($urlIndex) -ForegroundColor Gray
+        }
+        else {
+            Write-Host $footerLine
+        }
+    }
 }
 
 # Shows a controlled BLOCKER for a failure that happens before any Exchange
@@ -2039,6 +2037,70 @@ function Test-SourceServerSpecificCloneValue {
     return $false
 }
 
+# Returns the value that a source-server-specific Clone value would have on the
+# target: the source server Name or FQDN in the host part is replaced with the
+# target server name in the same form (short name -> short name, FQDN -> FQDN).
+# Scheme, port, path, and query are kept as they are. Returns $null when the
+# value does not reference the source server or a target name is missing.
+# This is used only to show "In sync (target-specific)". It never changes a URL.
+function Get-TargetSpecificCloneValue {
+    param(
+        $Value,
+        [Parameter(Mandatory = $true)]$SourceSnapshot,
+        [Parameter(Mandatory = $true)]$TargetSnapshot
+    )
+
+    if ($null -eq $Value) { return $null }
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $sourceServer = $SourceSnapshot.PSObject.Properties['ExchangeServer']
+    $targetServer = $TargetSnapshot.PSObject.Properties['ExchangeServer']
+    if ($null -eq $sourceServer -or $null -eq $sourceServer.Value -or
+        $null -eq $targetServer -or $null -eq $targetServer.Value) { return $null }
+
+    $prefix = ''
+    $hostName = $text
+    $suffix = ''
+    if ($text -match '^(?<Prefix>[A-Za-z][A-Za-z0-9+.-]*://)(?<Host>[^/:?#]+)(?<Suffix>.*)$') {
+        # Read all groups before the next -match/-notmatch, which replaces $Matches.
+        $prefix = $Matches['Prefix']
+        $hostName = $Matches['Host']
+        $suffix = $Matches['Suffix']
+        if ($prefix -notmatch '^(?i:https?)://$') { return $null }
+    }
+    $hostName = $hostName.TrimEnd('.')
+
+    foreach ($propertyName in @('Fqdn','Name')) {
+        $sourceProperty = $sourceServer.Value.PSObject.Properties[$propertyName]
+        if ($null -eq $sourceProperty -or [string]::IsNullOrWhiteSpace([string]$sourceProperty.Value)) { continue }
+        $sourceName = ([string]$sourceProperty.Value).Trim().TrimEnd('.')
+        if (-not $hostName.Equals($sourceName, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
+        $targetProperty = $targetServer.Value.PSObject.Properties[$propertyName]
+        if ($null -eq $targetProperty -or [string]::IsNullOrWhiteSpace([string]$targetProperty.Value)) { return $null }
+        $targetName = ([string]$targetProperty.Value).Trim().TrimEnd('.')
+        return ('{0}{1}{2}' -f $prefix, $targetName, $suffix)
+    }
+
+    return $null
+}
+
+# True when a source-server-specific value already matches the target, after the
+# source server name is replaced with the target server name.
+function Test-TargetSpecificValueInSync {
+    param(
+        $SourceValue,
+        $TargetValue,
+        [Parameter(Mandatory = $true)]$SourceSnapshot,
+        [Parameter(Mandatory = $true)]$TargetSnapshot
+    )
+
+    $expected = Get-TargetSpecificCloneValue -Value $SourceValue -SourceSnapshot $SourceSnapshot -TargetSnapshot $TargetSnapshot
+    if ($null -eq $expected -or $null -eq $TargetValue) { return $false }
+    return ((ConvertTo-ComparableValue $expected) -eq (ConvertTo-ComparableValue $TargetValue))
+}
+
 # Returns the Exchange build as Major.Minor.Build from the snapshot's
 # Get-ExchangeServer AdminDisplayVersion, for example 15.2.1748 from
 # "Version 15.2 (Build 1748.10)". The last number is intentionally ignored
@@ -3160,6 +3222,28 @@ function Assert-SameServerRestore {
 # ---------------------------------------------------------------------------
 # Build Desired Configuration
 # ---------------------------------------------------------------------------
+# A Clone value that references the source server, while the target already uses
+# its own server name in the same place. Policy InSync is informational only:
+# New-ChangePlan finds no difference, and New-TargetOperations only uses Apply
+# items, so no Set-* command is ever built for it.
+function New-InSyncComponent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Values,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$SourceValues
+    )
+
+    return [PSCustomObject]@{
+        Key = $Key
+        Name = $Name
+        Values = $Values
+        SourceValues = $SourceValues
+        Policy = 'InSync'
+        ReviewNote = 'The target already uses its own server name here. No change is needed.'
+    }
+}
+
 function New-DesiredConfiguration {
     param(
         [Parameter(Mandatory = $true)]$TargetSnapshot,
@@ -3236,11 +3320,25 @@ function New-DesiredConfiguration {
             elseif ($SourceSnapshot) {
                 $applyUrlValues = [ordered]@{}
                 $serverSpecificUrlValues = [ordered]@{}
+                $inSyncUrlValues = [ordered]@{}
+                $inSyncSourceValues = [ordered]@{}
+                $targetUrlObject = Get-SnapshotComponent -Snapshot $TargetSnapshot -Key $entry.Key
 
                 foreach ($propertyName in @('InternalUrl','ExternalUrl')) {
                     $value = $urlValues[$propertyName]
                     if (Test-SourceServerSpecificCloneValue -Value $value -SourceSnapshot $SourceSnapshot) {
-                        $serverSpecificUrlValues[$propertyName] = $value
+                        # Only internal values can be in sync. Server names in
+                        # external values stay Review Only.
+                        $targetUrlProperty = if ($targetUrlObject) { $targetUrlObject.PSObject.Properties[$propertyName] } else { $null }
+                        $targetUrlValue = if ($targetUrlProperty) { $targetUrlProperty.Value } else { $null }
+                        if ($propertyName -eq 'InternalUrl' -and
+                            (Test-TargetSpecificValueInSync -SourceValue $value -TargetValue $targetUrlValue -SourceSnapshot $SourceSnapshot -TargetSnapshot $TargetSnapshot)) {
+                            $inSyncUrlValues[$propertyName] = $targetUrlValue
+                            $inSyncSourceValues[$propertyName] = $value
+                        }
+                        else {
+                            $serverSpecificUrlValues[$propertyName] = $value
+                        }
                     }
                     else {
                         $applyUrlValues[$propertyName] = $value
@@ -3265,6 +3363,10 @@ function New-DesiredConfiguration {
                         Policy = 'ReviewOnly'
                         ReviewNote = 'Source value references the source Exchange server directly. Review the target namespace and publishing design before changing it.'
                     })
+                }
+
+                if ($inSyncUrlValues.Count -gt 0) {
+                    [void]$components.Add((New-InSyncComponent -Key $entry.Key -Name $entry.Name -Values $inSyncUrlValues -SourceValues $inSyncSourceValues))
                 }
             }
             else {
@@ -3330,16 +3432,27 @@ function New-DesiredConfiguration {
         "https://$AutodiscoverNamespace/Autodiscover/Autodiscover.xml"
     }
     $scpIsSourceServerSpecific = $SourceSnapshot -and (Test-SourceServerSpecificCloneValue -Value $scpValue -SourceSnapshot $SourceSnapshot)
-    [void]$components.Add([PSCustomObject]@{
-        Key = 'ClientAccess'
-        Name = 'Autodiscover SCP'
-        Values = [ordered]@{ AutoDiscoverServiceInternalUri = $scpValue }
-        Policy = if ($scpIsSourceServerSpecific) { 'ReviewOnly' } else { 'Apply' }
-        ReviewNote = if ($scpIsSourceServerSpecific) {
-            'Source value references the source Exchange server directly. Review the target namespace and publishing design before changing it.'
-        }
-        else { $null }
-    })
+    $targetScpValue = $null
+    if ($scpIsSourceServerSpecific -and $TargetSnapshot.ClientAccess) {
+        $targetScpProperty = $TargetSnapshot.ClientAccess.PSObject.Properties['AutoDiscoverServiceInternalUri']
+        if ($targetScpProperty) { $targetScpValue = $targetScpProperty.Value }
+    }
+    if ($scpIsSourceServerSpecific -and
+        (Test-TargetSpecificValueInSync -SourceValue $scpValue -TargetValue $targetScpValue -SourceSnapshot $SourceSnapshot -TargetSnapshot $TargetSnapshot)) {
+        [void]$components.Add((New-InSyncComponent -Key 'ClientAccess' -Name 'Autodiscover SCP' -Values ([ordered]@{ AutoDiscoverServiceInternalUri = $targetScpValue }) -SourceValues ([ordered]@{ AutoDiscoverServiceInternalUri = $scpValue })))
+    }
+    else {
+        [void]$components.Add([PSCustomObject]@{
+            Key = 'ClientAccess'
+            Name = 'Autodiscover SCP'
+            Values = [ordered]@{ AutoDiscoverServiceInternalUri = $scpValue }
+            Policy = if ($scpIsSourceServerSpecific) { 'ReviewOnly' } else { 'Apply' }
+            ReviewNote = if ($scpIsSourceServerSpecific) {
+                'Source value references the source Exchange server directly. Review the target namespace and publishing design before changing it.'
+            }
+            else { $null }
+        })
+    }
 
     if ($SourceSnapshot) {
         [void]$components.Add([PSCustomObject]@{
@@ -3353,6 +3466,8 @@ function New-DesiredConfiguration {
 
     $oaValues = [ordered]@{}
     $oaServerSpecificReviewValues = [ordered]@{}
+    $oaInSyncValues = [ordered]@{}
+    $oaInSyncSourceValues = [ordered]@{}
     $oaSslReviewValues = [ordered]@{}
     $oaAuthReviewValues = [ordered]@{}
     $oaDefaultAuth = $null
@@ -3362,7 +3477,16 @@ function New-DesiredConfiguration {
             $property = $SourceSnapshot.OutlookAny.PSObject.Properties[$propertyName]
             if ($property) {
                 if (Test-SourceServerSpecificCloneValue -Value $property.Value -SourceSnapshot $SourceSnapshot) {
-                    $oaServerSpecificReviewValues[$propertyName] = $property.Value
+                    $targetOaProperty = if ($TargetSnapshot.OutlookAny) { $TargetSnapshot.OutlookAny.PSObject.Properties[$propertyName] } else { $null }
+                    $targetOaValue = if ($targetOaProperty) { $targetOaProperty.Value } else { $null }
+                    if ($propertyName -eq 'InternalHostname' -and
+                        (Test-TargetSpecificValueInSync -SourceValue $property.Value -TargetValue $targetOaValue -SourceSnapshot $SourceSnapshot -TargetSnapshot $TargetSnapshot)) {
+                        $oaInSyncValues[$propertyName] = $targetOaValue
+                        $oaInSyncSourceValues[$propertyName] = $property.Value
+                    }
+                    else {
+                        $oaServerSpecificReviewValues[$propertyName] = $property.Value
+                    }
                 }
                 else {
                     $oaValues[$propertyName] = $property.Value
@@ -3431,6 +3555,10 @@ function New-DesiredConfiguration {
             Policy = 'ReviewOnly'
             ReviewNote = 'Source value references the source Exchange server directly. Review the target namespace and publishing design before changing it.'
         })
+    }
+
+    if ($SourceSnapshot -and $oaInSyncValues.Count -gt 0) {
+        [void]$components.Add((New-InSyncComponent -Key 'OutlookAny' -Name 'Outlook Anywhere (RPC over HTTP)' -Values $oaInSyncValues -SourceValues $oaInSyncSourceValues))
     }
 
     if ($SourceSnapshot -and $oaSslReviewValues.Count -gt 0) {
@@ -3740,6 +3868,13 @@ function New-ComparisonPlan {
             $targetValue = if ($targetProperty) { $targetProperty.Value } else { $null }
             $status = if ((ConvertTo-ComparableValue $sourceValue) -eq (ConvertTo-ComparableValue $targetValue)) { 'Same' } else { 'Different' }
 
+            # In sync items show the original source value. Values holds the
+            # target-specific form, which already matches the target.
+            if ($itemPolicy -eq 'InSync') {
+                $sourceValue = $component.SourceValues[$propertyName]
+                $status = 'In sync (target-specific)'
+            }
+
             [void]$items.Add([PSCustomObject]@{
                 Target       = $TargetSnapshot.Server
                 ComponentKey = $component.Key
@@ -3995,7 +4130,7 @@ function Show-ComparisonPlan {
                 }
                 else {
                     Write-Host ("  {0} : {1}" -f $targetLabel, $item.TargetValue) -ForegroundColor Gray
-                    Write-Host ("  {0} : Same" -f 'Status'.PadRight($serverLabelWidth)) -ForegroundColor Green
+                    Write-Host ("  {0} : {1}" -f 'Status'.PadRight($serverLabelWidth), $item.Status) -ForegroundColor Green
                 }
             }
 
@@ -4010,7 +4145,9 @@ function Show-ComparisonPlan {
     foreach ($target in $targets) {
         $targetItems = @($Comparisons | Where-Object { $_.Target -eq $target })
         $differentItems = @($targetItems | Where-Object { $_.Status -eq 'Different' })
-        $sameItems = @($targetItems | Where-Object { $_.Status -eq 'Same' })
+        # In sync (target-specific) items are listed with Same. They are not differences.
+        $sameItems = @($targetItems | Where-Object { $_.Status -in @('Same','In sync (target-specific)') })
+        $inSyncCount = @($targetItems | Where-Object { $_.Status -eq 'In sync (target-specific)' }).Count
 
         $differentGroups = @(
             $differentItems |
@@ -4041,6 +4178,7 @@ function Show-ComparisonPlan {
             ComparedCount    = $targetItems.Count
             DifferentCount   = $differentItems.Count
             SameCount        = $sameItems.Count
+            InSyncCount      = $inSyncCount
             DifferentGroups  = $differentGroups
             SameGroups       = $sameGroups
         }
@@ -4074,9 +4212,12 @@ function Show-ComparisonPlan {
             ("Target server     : {0}" -f $model.Target),
             ("Compared settings : {0}" -f $model.ComparedCount),
             ("Different         : {0}" -f $model.DifferentCount),
-            ("Same              : {0}" -f $model.SameCount),
-            ''
+            ("Same              : {0}" -f $model.SameCount)
         )
+        if ($model.InSyncCount -gt 0) {
+            $metadataLines += ("  In sync (target-specific) : {0}" -f $model.InSyncCount)
+        }
+        $metadataLines += ''
 
         $metadataRows = 0
         foreach ($line in $metadataLines) {
@@ -4099,6 +4240,9 @@ function Show-ComparisonPlan {
         Write-Host $metadataLines[2] -ForegroundColor Gray
         Write-Host $metadataLines[3] -ForegroundColor Red
         Write-Host $metadataLines[4] -ForegroundColor Green
+        if ($model.InSyncCount -gt 0) {
+            Write-Host $metadataLines[5] -ForegroundColor Green
+        }
         Write-Host ''
         $pageLinesUsed += $metadataRows
 
@@ -4332,7 +4476,9 @@ function Export-ComparisonReport {
     foreach ($target in $Targets) {
         $targetItems = @($Comparisons | Where-Object { $_.Target -eq $target })
         $differentItems = @($targetItems | Where-Object { $_.Status -eq 'Different' })
-        $sameItems = @($targetItems | Where-Object { $_.Status -eq 'Same' })
+        # In sync (target-specific) items are listed with Same. They are not differences.
+        $sameItems = @($targetItems | Where-Object { $_.Status -in @('Same','In sync (target-specific)') })
+        $inSyncCount = @($targetItems | Where-Object { $_.Status -eq 'In sync (target-specific)' }).Count
 
         [void]$lines.Add('')
         [void]$lines.Add(("Source server     : {0}" -f $SourceServer))
@@ -4340,6 +4486,9 @@ function Export-ComparisonReport {
         [void]$lines.Add(("Compared settings : {0}" -f $targetItems.Count))
         [void]$lines.Add(("Different         : {0}" -f $differentItems.Count))
         [void]$lines.Add(("Same              : {0}" -f $sameItems.Count))
+        if ($inSyncCount -gt 0) {
+            [void]$lines.Add(("  In sync (target-specific) : {0}" -f $inSyncCount))
+        }
         [void]$lines.Add('')
 
         $differentGroups = @(
@@ -4489,8 +4638,57 @@ function Show-ChangePlan {
             Write-Host '  Policy  : Review Only - not applied automatically' -ForegroundColor Yellow
             if ($change.ReviewNote) { Write-Host ("  Review  : {0}" -f $change.ReviewNote) -ForegroundColor Yellow }
         }
-        Write-Host ("  Current : {0}" -f $change.Current)
-        Write-Host ("  New     : {0}" -f $change.New) -ForegroundColor $(if ($change.Policy -eq 'ReviewOnly') { 'Yellow' } else { 'Green' })
+        Write-Host ("  Current   : {0}" -f $change.Current)
+        if ($change.Policy -eq 'ReviewOnly') {
+            # Review Only values are never applied. "New" would suggest a change.
+            Write-Host ("  Reference : {0}" -f $change.New) -ForegroundColor Yellow
+        }
+        else {
+            Write-Host ("  New       : {0}" -f $change.New) -ForegroundColor Green
+        }
+    }
+}
+
+# Clone values that reference the source server while the target already uses
+# its own server name. Informational only; these never produce a Set-* command.
+function Get-InSyncItems {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$DesiredByTarget,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Targets
+    )
+
+    $items = New-Object System.Collections.ArrayList
+    foreach ($targetServer in $Targets) {
+        if (-not $DesiredByTarget.ContainsKey($targetServer)) { continue }
+        foreach ($component in @($DesiredByTarget[$targetServer].Components | Where-Object { $_.Policy -eq 'InSync' })) {
+            foreach ($propertyName in @($component.Values.Keys)) {
+                [void]$items.Add([PSCustomObject]@{
+                    Target    = $targetServer
+                    Component = $component.Name
+                    Setting   = [string]$propertyName
+                    Value     = ConvertTo-DisplayValue $component.Values[$propertyName]
+                })
+            }
+        }
+    }
+    return @($items)
+}
+
+function Show-InSyncItems {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$DesiredByTarget,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Targets
+    )
+
+    $items = @(Get-InSyncItems -DesiredByTarget $DesiredByTarget -Targets $Targets)
+    if ($items.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Host 'In sync (target-specific)' -ForegroundColor Cyan
+    Write-Host '-------------------------' -ForegroundColor Cyan
+    Write-Host 'The source uses its own server name here. The target already uses its own name. No change is needed.' -ForegroundColor DarkCyan
+    foreach ($item in $items) {
+        Write-Host ("  [{0}] {1} - {2} : {3}" -f $item.Target, $item.Component, $item.Setting, $item.Value) -ForegroundColor Green
     }
 }
 
@@ -4794,9 +4992,13 @@ function Get-TargetOperationBlockers {
 }
 
 # Apply must run against the configuration that the fresh pre-change backup
-# captured. Rebuild the Set-* commands from that fresh snapshot and compare them
-# with the commands built from the Preview snapshot. Any difference, for example
-# a companion value or a planned setting that changed after Preview, stops Apply.
+# captured. Two checks run for every target:
+# 1. The current value of each planned setting, and of each companion value that
+#    is copied from the target into a Set-* command, must still match Preview.
+#    A planned value can change after Preview while the generated command stays
+#    the same (for example X -> Y while the new value is Z), so comparing the
+#    commands alone is not enough.
+# 2. The Set-* commands rebuilt from the fresh snapshot must match Preview.
 function Get-ApplyDriftBlockers {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Changes,
@@ -4809,22 +5011,56 @@ function Get-ApplyDriftBlockers {
     $blockers = New-Object System.Collections.ArrayList
     foreach ($targetServer in $Targets) {
         $previewPlan = @($Changes | Where-Object { $_.Target -eq $targetServer })
-        if (@($previewPlan | Where-Object { $_.Policy -eq 'Apply' }).Count -eq 0) { continue }
+        $previewApplyPlan = @($previewPlan | Where-Object { $_.Policy -eq 'Apply' })
+        if ($previewApplyPlan.Count -eq 0) { continue }
 
         if ($null -eq $FreshSnapshots -or -not $FreshSnapshots.ContainsKey($targetServer)) {
             [void]$blockers.Add(("[{0}] The fresh pre-change configuration is not available." -f $targetServer))
             continue
         }
 
+        $freshSnapshot = $FreshSnapshots[$targetServer]
+        $valueBlockers = New-Object System.Collections.ArrayList
+
         try {
             $desired = $DesiredByTarget[$targetServer]
-            $freshPlan = @(New-ChangePlan -TargetSnapshot $FreshSnapshots[$targetServer] -DesiredConfiguration $desired)
+            $previewOperations = @(New-TargetOperations -TargetSnapshot $PreviewSnapshots[$targetServer] -DesiredConfiguration $desired -Plan $previewPlan)
+
+            # Planned settings: compare the Preview current value with the fresh value.
+            foreach ($item in $previewApplyPlan) {
+                $freshObject = Get-SnapshotComponent -Snapshot $freshSnapshot -Key $item.ComponentKey
+                $freshProperty = if ($freshObject) { $freshObject.PSObject.Properties[$item.Setting] } else { $null }
+                $freshValue = if ($freshProperty) { $freshProperty.Value } else { $null }
+                if ((ConvertTo-ComparableValue $item.CurrentValue) -ne (ConvertTo-ComparableValue $freshValue)) {
+                    [void]$valueBlockers.Add(("[{0}] {1} {2} changed after Preview (Preview: {3}, now: {4})." -f $targetServer, $item.Component, $item.Setting, $item.Current, (ConvertTo-DisplayValue $freshValue)))
+                }
+            }
+
+            # Companion values: parameters copied from the target into a Set-* command.
+            foreach ($operation in $previewOperations) {
+                $plannedSettings = @($operation.Changes | ForEach-Object { [string]$_.Setting })
+                $componentKey = [string](@($operation.Changes)[0].ComponentKey)
+                $componentName = [string](@($operation.Changes)[0].Component)
+                $freshObject = Get-SnapshotComponent -Snapshot $freshSnapshot -Key $componentKey
+                foreach ($parameterName in @($operation.Parameters.Keys)) {
+                    if ([string]$parameterName -in @('Identity','Confirm','DefaultAuthenticationMethod')) { continue }
+                    if ($plannedSettings -contains [string]$parameterName) { continue }
+                    $freshProperty = if ($freshObject) { $freshObject.PSObject.Properties[[string]$parameterName] } else { $null }
+                    $freshValue = if ($freshProperty) { $freshProperty.Value } else { $null }
+                    $previewValue = $operation.Parameters[$parameterName]
+                    if ((ConvertTo-ComparableValue $previewValue) -ne (ConvertTo-ComparableValue $freshValue)) {
+                        [void]$valueBlockers.Add(("[{0}] {1} {2} changed after Preview (Preview: {3}, now: {4})." -f $targetServer, $componentName, $parameterName, (ConvertTo-DisplayValue $previewValue), (ConvertTo-DisplayValue $freshValue)))
+                    }
+                }
+            }
+
+            $freshPlan = @(New-ChangePlan -TargetSnapshot $freshSnapshot -DesiredConfiguration $desired)
             $previewCommands = @(
-                New-TargetOperations -TargetSnapshot $PreviewSnapshots[$targetServer] -DesiredConfiguration $desired -Plan $previewPlan |
+                $previewOperations |
                     ForEach-Object { New-SetCommandLine -CommandName $_.CommandName -Parameters $_.Parameters }
             )
             $freshCommands = @(
-                New-TargetOperations -TargetSnapshot $FreshSnapshots[$targetServer] -DesiredConfiguration $desired -Plan $freshPlan |
+                New-TargetOperations -TargetSnapshot $freshSnapshot -DesiredConfiguration $desired -Plan $freshPlan |
                     ForEach-Object { New-SetCommandLine -CommandName $_.CommandName -Parameters $_.Parameters }
             )
         }
@@ -4833,12 +5069,213 @@ function Get-ApplyDriftBlockers {
             continue
         }
 
-        if (($previewCommands -join "`n") -cne ($freshCommands -join "`n")) {
+        foreach ($valueBlocker in $valueBlockers) { [void]$blockers.Add($valueBlocker) }
+
+        # Report the command difference only when no specific setting explains it.
+        if ($valueBlockers.Count -eq 0 -and ($previewCommands -join "`n") -cne ($freshCommands -join "`n")) {
             [void]$blockers.Add(("[{0}] The Set-* commands built from the fresh pre-change configuration differ from Preview." -f $targetServer))
         }
     }
 
     return @($blockers)
+}
+
+# Clone builds its plan from the source values read before Preview. Before Apply,
+# the source is read again. Only the source values that the Apply plan uses are
+# compared, so unrelated source changes do not block Apply.
+function Get-CloneSourceDriftBlockers {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Changes,
+        [Parameter(Mandatory = $true)][hashtable]$PreviewDesiredByTarget,
+        [Parameter(Mandatory = $true)][hashtable]$FreshDesiredByTarget,
+        [Parameter(Mandatory = $true)][string[]]$Targets,
+        [Parameter(Mandatory = $true)][string]$SourceServer
+    )
+
+    $blockers = New-Object System.Collections.ArrayList
+    $reported = @{}
+    foreach ($targetServer in $Targets) {
+        $applyPlan = @($Changes | Where-Object { $_.Target -eq $targetServer -and $_.Policy -eq 'Apply' })
+        if ($applyPlan.Count -eq 0) { continue }
+
+        foreach ($item in $applyPlan) {
+            $freshComponents = @()
+            if ($FreshDesiredByTarget.ContainsKey($targetServer)) {
+                $freshComponents = @($FreshDesiredByTarget[$targetServer].Components | Where-Object {
+                    $_.Key -eq $item.ComponentKey -and $_.Policy -eq 'Apply' -and $_.Values.Contains($item.Setting)
+                })
+            }
+
+            $key = '{0}|{1}' -f $item.ComponentKey, $item.Setting
+            if ($freshComponents.Count -eq 0) {
+                if (-not $reported.ContainsKey($key)) {
+                    $reported[$key] = $true
+                    [void]$blockers.Add(("[{0} source] {1} {2} changed after Preview and is no longer applied automatically." -f $SourceServer, $item.Component, $item.Setting))
+                }
+                continue
+            }
+
+            $freshValue = $freshComponents[0].Values[$item.Setting]
+            if ((ConvertTo-ComparableValue $item.NewValue) -ne (ConvertTo-ComparableValue $freshValue)) {
+                if (-not $reported.ContainsKey($key)) {
+                    $reported[$key] = $true
+                    [void]$blockers.Add(("[{0} source] {1} {2} changed after Preview (Preview: {3}, now: {4})." -f $SourceServer, $item.Component, $item.Setting, $item.New, (ConvertTo-DisplayValue $freshValue)))
+                }
+            }
+        }
+    }
+
+    return @($blockers)
+}
+
+# Resulting Outlook Anywhere state per target after Apply: hostname and
+# RequireSsl values come from the Set-OutlookAnywhere command when it sets them,
+# otherwise from the current target value. SSLOffloading is never changed by
+# this script. Preview shows the SSL values; Get-OutlookAnywhereSslBlockers uses
+# the full state to block Apply when Exchange would reject the command.
+# A hostname property that exists but is empty is a valid empty hostname.
+# A missing hostname property is reported as unknown (HostnameKnown = $false).
+function Get-OutlookAnywhereResultingSslState {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Changes,
+        [Parameter(Mandatory = $true)][hashtable]$TargetSnapshots,
+        [Parameter(Mandatory = $true)][hashtable]$DesiredByTarget,
+        [Parameter(Mandatory = $true)][string[]]$Targets
+    )
+
+    $states = New-Object System.Collections.ArrayList
+    foreach ($targetServer in $Targets) {
+        $targetPlan = @($Changes | Where-Object { $_.Target -eq $targetServer })
+        if (@($targetPlan | Where-Object { $_.Policy -eq 'Apply' -and $_.ComponentKey -eq 'OutlookAny' }).Count -eq 0) { continue }
+
+        $operation = @(New-TargetOperations -TargetSnapshot $TargetSnapshots[$targetServer] -DesiredConfiguration $DesiredByTarget[$targetServer] -Plan $targetPlan |
+            Where-Object { $_.CommandName -eq 'Set-OutlookAnywhere' }) | Select-Object -First 1
+        if ($null -eq $operation) { continue }
+
+        $current = $TargetSnapshots[$targetServer].OutlookAny
+        $values = [ordered]@{}
+        foreach ($propertyName in @('InternalClientsRequireSsl','ExternalClientsRequireSsl')) {
+            if ($operation.Parameters.Contains($propertyName)) {
+                $values[$propertyName] = $operation.Parameters[$propertyName]
+            }
+            else {
+                $property = if ($current) { $current.PSObject.Properties[$propertyName] } else { $null }
+                $values[$propertyName] = if ($property) { $property.Value } else { $null }
+            }
+        }
+        $offloadProperty = if ($current) { $current.PSObject.Properties['SSLOffloading'] } else { $null }
+
+        $hostnames = [ordered]@{}
+        $hostnameKnown = [ordered]@{}
+        foreach ($propertyName in @('InternalHostname','ExternalHostname')) {
+            if ($operation.Parameters.Contains($propertyName)) {
+                $hostnames[$propertyName] = $operation.Parameters[$propertyName]
+                $hostnameKnown[$propertyName] = $true
+            }
+            else {
+                $property = if ($current) { $current.PSObject.Properties[$propertyName] } else { $null }
+                $hostnames[$propertyName] = if ($property) { $property.Value } else { $null }
+                $hostnameKnown[$propertyName] = ($null -ne $property)
+            }
+        }
+
+        [void]$states.Add([PSCustomObject]@{
+            Target                    = $targetServer
+            InternalClientsRequireSsl = $values['InternalClientsRequireSsl']
+            ExternalClientsRequireSsl = $values['ExternalClientsRequireSsl']
+            SSLOffloading             = $(if ($offloadProperty) { $offloadProperty.Value } else { $null })
+            InternalHostname          = $hostnames['InternalHostname']
+            ExternalHostname          = $hostnames['ExternalHostname']
+            InternalHostnameKnown     = $hostnameKnown['InternalHostname']
+            ExternalHostnameKnown     = $hostnameKnown['ExternalHostname']
+        })
+    }
+    return @($states)
+}
+
+# Normalizes an Outlook Anywhere SSL value to $true, $false, or $null (unknown).
+# Restore values can be strings such as "False", so raw truthiness is not used.
+function ConvertTo-OutlookAnywhereBoolean {
+    param($Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [bool]) { return $Value }
+    $text = ([string]$Value).Trim()
+    if ($text -ieq 'True') { return $true }
+    if ($text -ieq 'False') { return $false }
+    return $null
+}
+
+# Exchange rejects Set-OutlookAnywhere when SSLOffloading is False and a side
+# (Internal or External) that has a hostname does not require SSL. LAB results:
+# an internal-only change was accepted while ExternalClientsRequireSsl was False
+# and ExternalHostname was empty; setting ExternalHostname with
+# ExternalClientsRequireSsl False and SSLOffloading False was rejected.
+# The check uses resulting values, so a side that already violates the rule is
+# also reported. Unknown values on a side with a hostname are reported, and an
+# unknown hostname is reported. A side with an empty hostname is not checked.
+# The script never changes SSLOffloading or the RequireSsl settings.
+function Get-OutlookAnywhereSslBlockers {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$States)
+
+    $blockers = New-Object System.Collections.ArrayList
+    foreach ($state in $States) {
+        $offloading = ConvertTo-OutlookAnywhereBoolean $state.SSLOffloading
+        foreach ($side in @('Internal','External')) {
+            $hostnameName = "{0}Hostname" -f $side
+            $requireSslName = "{0}ClientsRequireSsl" -f $side
+            $hostnameKnown = [bool]$state.PSObject.Properties[("{0}Known" -f $hostnameName)].Value
+            $hostname = $state.PSObject.Properties[$hostnameName].Value
+
+            if (-not $hostnameKnown) {
+                [void]$blockers.Add([PSCustomObject]@{
+                    Target  = $state.Target
+                    Side    = $side
+                    Message = ("{0}: {1} cannot be determined." -f $side, $hostnameName)
+                })
+                continue
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$hostname)) { continue }
+            if ($offloading -eq $true) { continue }
+
+            $requireSsl = ConvertTo-OutlookAnywhereBoolean $state.PSObject.Properties[$requireSslName].Value
+            if ($null -eq $offloading -or $null -eq $requireSsl) {
+                $unknownName = if ($null -eq $offloading) { 'SSLOffloading' } else { $requireSslName }
+                [void]$blockers.Add([PSCustomObject]@{
+                    Target  = $state.Target
+                    Side    = $side
+                    Message = ("{0}: {1} cannot be determined. {2} {3}." -f $side, $unknownName, $hostnameName, [string]$hostname)
+                })
+                continue
+            }
+            if ($requireSsl -eq $false) {
+                [void]$blockers.Add([PSCustomObject]@{
+                    Target  = $state.Target
+                    Side    = $side
+                    Message = ("{0}: SSLOffloading False, {1} False, {2} {3}." -f $side, $requireSslName, $hostnameName, [string]$hostname)
+                })
+            }
+        }
+    }
+    return @($blockers)
+}
+
+function Show-OutlookAnywhereResultingSslState {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$States)
+
+    if ($States.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Host 'Outlook Anywhere (RPC over HTTP) SSL settings after Apply' -ForegroundColor Cyan
+    Write-Host '---------------------------------------------------------' -ForegroundColor Cyan
+    Write-Host 'Review these values. SSLOffloading is not changed by this script.' -ForegroundColor DarkCyan
+    foreach ($state in $States) {
+        Write-Host ("  [{0}] InternalClientsRequireSsl: {1}  ExternalClientsRequireSsl: {2}  SSLOffloading: {3}" -f
+            $state.Target,
+            (ConvertTo-DisplayValue $state.InternalClientsRequireSsl),
+            (ConvertTo-DisplayValue $state.ExternalClientsRequireSsl),
+            (ConvertTo-DisplayValue $state.SSLOffloading)) -ForegroundColor Gray
+    }
 }
 
 # Lists parameters that New-TargetOperations adds to a Set-* command in addition
@@ -4908,13 +5345,23 @@ function Export-CommandPlan {
         ''
     )) { [void]$lines.Add($line) }
 
+    # Every target gets a section, including targets with only In sync items or
+    # with nothing to change, so the TXT file is complete even when no Set-*
+    # command is generated.
+    $commandCount = 0
     foreach ($targetServer in $Targets) {
         $targetPlan = @($Changes | Where-Object { $_.Target -eq $targetServer })
-        if ($targetPlan.Count -eq 0) { continue }
+        $inSyncItems = @(Get-InSyncItems -DesiredByTarget $DesiredByTarget -Targets @($targetServer))
         [void]$lines.Add('# =====================================================================')
         [void]$lines.Add("# Target: $targetServer")
         [void]$lines.Add('# =====================================================================')
         [void]$lines.Add('')
+
+        if ($targetPlan.Count -eq 0 -and $inSyncItems.Count -eq 0) {
+            [void]$lines.Add('# No changes required for this target.')
+            [void]$lines.Add('')
+            continue
+        }
 
         $reviewItems = @($targetPlan | Where-Object { $_.Policy -eq 'ReviewOnly' })
         foreach ($reviewItem in $reviewItems) {
@@ -4922,6 +5369,13 @@ function Export-CommandPlan {
             [void]$lines.Add("# Current: $($reviewItem.Current)")
             [void]$lines.Add("# Source/Reference: $($reviewItem.New)")
             if ($reviewItem.ReviewNote) { [void]$lines.Add("# Note   : $($reviewItem.ReviewNote)") }
+            [void]$lines.Add('# No command generated for this setting.')
+            [void]$lines.Add('')
+        }
+
+        foreach ($inSyncItem in $inSyncItems) {
+            [void]$lines.Add("# IN SYNC (target-specific): $($inSyncItem.Component) - $($inSyncItem.Setting)")
+            [void]$lines.Add("# Current: $($inSyncItem.Value)")
             [void]$lines.Add('# No command generated for this setting.')
             [void]$lines.Add('')
         }
@@ -4936,7 +5390,11 @@ function Export-CommandPlan {
             }
             [void]$lines.Add((New-SetCommandLine -CommandName $operation.CommandName -Parameters $operation.Parameters))
             [void]$lines.Add('')
+            $commandCount++
         }
+    }
+    if ($commandCount -eq 0) {
+        [void]$lines.Add('# No Set-* commands were generated. No configuration changes are required.')
     }
     Set-Content -LiteralPath $Path -Value @($lines) -Encoding UTF8
 }
@@ -5024,46 +5482,71 @@ function Test-PlannedHostnameResolution {
 function Test-ApplyReadiness {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$ActionableChanges,
+        [AllowEmptyCollection()][array]$OutlookAnywhereSslBlockers = @(),
         [switch]$ReportOnly
     )
 
     $dnsResults = @(Test-PlannedHostnameResolution -Changes $ActionableChanges)
-    if ($dnsResults.Count -eq 0) { return $true }
+    $oaBlockers = @($OutlookAnywhereSslBlockers)
+    if ($dnsResults.Count -eq 0 -and $oaBlockers.Count -eq 0) { return $true }
 
     Write-Host ''
     Write-Host 'Apply readiness' -ForegroundColor Cyan
     Write-Host '---------------' -ForegroundColor Cyan
-    Write-Host 'Checking DNS resolution for proposed EWS URL hostnames...' -ForegroundColor DarkCyan
 
-    foreach ($item in $dnsResults) {
-        if ($item.Status -eq 'Resolved') {
-            Write-Host ("  PASS    {0} -> {1}" -f $item.HostName, $item.Addresses) -ForegroundColor Green
+    $blocked = @()
+    if ($dnsResults.Count -gt 0) {
+        Write-Host 'Checking DNS resolution for proposed EWS URL hostnames...' -ForegroundColor DarkCyan
+
+        foreach ($item in $dnsResults) {
+            if ($item.Status -eq 'Resolved') {
+                Write-Host ("  PASS    {0} -> {1}" -f $item.HostName, $item.Addresses) -ForegroundColor Green
+            }
+            else {
+                Write-Host ("  BLOCKER {0} - cannot be resolved" -f $item.HostName) -ForegroundColor Red
+            }
         }
-        else {
-            Write-Host ("  BLOCKER {0} - cannot be resolved" -f $item.HostName) -ForegroundColor Red
+
+        $blocked = @($dnsResults | Where-Object { $_.Status -eq 'BLOCKER' })
+    }
+
+    if ($oaBlockers.Count -gt 0) {
+        Write-Host 'Checking Outlook Anywhere (RPC over HTTP) SSL settings after Apply...' -ForegroundColor DarkCyan
+        foreach ($oaBlocker in $oaBlockers) {
+            Write-Host ("  BLOCKER [{0}] {1}" -f $oaBlocker.Target, $oaBlocker.Message) -ForegroundColor Red
         }
     }
 
-    $blocked = @($dnsResults | Where-Object { $_.Status -eq 'BLOCKER' })
-    if ($blocked.Count -eq 0) {
+    if ($blocked.Count -eq 0 -and $oaBlockers.Count -eq 0) {
         Write-Host 'Apply readiness check passed.' -ForegroundColor Green
         return $true
     }
 
     Write-Host ''
     if ($ReportOnly) {
-        Write-Warning 'Automatic Apply would be blocked because one or more proposed EWS URL hostnames cannot be resolved.'
-        Write-Warning 'Set-WebServicesVirtualDirectory displays additional native confirmation prompts for unresolved URL hosts, even with Confirm:$false.'
+        if ($blocked.Count -gt 0) {
+            Write-Warning 'Automatic Apply would be blocked because one or more proposed EWS URL hostnames cannot be resolved.'
+            Write-Warning 'Set-WebServicesVirtualDirectory displays additional native confirmation prompts for unresolved URL hosts, even with Confirm:$false.'
+        }
+        if ($oaBlockers.Count -gt 0) {
+            Write-Warning 'Automatic Apply would be blocked because Exchange rejects Set-OutlookAnywhere when SSLOffloading is False and a side that has a hostname does not require SSL.'
+        }
         Write-Host 'Command export will continue because -OutputFile does not apply Exchange configuration changes.' -ForegroundColor Yellow
         Write-Host 'Review the generated command carefully before running it manually.' -ForegroundColor Yellow
         return $false
     }
 
-    Write-Warning 'Automatic Apply is blocked because one or more proposed EWS URL hostnames cannot be resolved.'
-    Write-Warning 'Set-WebServicesVirtualDirectory displays additional native confirmation prompts for unresolved URL hosts, even with Confirm:$false. This can interrupt the plan and leave a partially applied configuration.'
-    Write-Host 'Create or verify the required DNS records, then run the Preview again.' -ForegroundColor Yellow
-    Write-Host 'If unresolved EWS values are intentional, use -OutputFile and review/run the generated commands manually.' -ForegroundColor Yellow
-    Write-Host 'No Exchange configuration changes were applied.' -ForegroundColor Green
+    if ($blocked.Count -gt 0) {
+        Write-Warning 'Automatic Apply is blocked because one or more proposed EWS URL hostnames cannot be resolved.'
+        Write-Warning 'Set-WebServicesVirtualDirectory displays additional native confirmation prompts for unresolved URL hosts, even with Confirm:$false. This can interrupt the plan and leave a partially applied configuration.'
+        Write-Host 'Create or verify the required DNS records, then run the Preview again.' -ForegroundColor Yellow
+        Write-Host 'If unresolved EWS values are intentional, use -OutputFile and review/run the generated commands manually.' -ForegroundColor Yellow
+    }
+    if ($oaBlockers.Count -gt 0) {
+        Write-Warning 'Automatic Apply is blocked because Exchange rejects Set-OutlookAnywhere when SSLOffloading is False and a side that has a hostname does not require SSL.'
+        Write-Host 'The script does not change SSLOffloading or the RequireSsl settings. Review the Outlook Anywhere SSL design, then run the Preview again.' -ForegroundColor Yellow
+    }
+    Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
     return $false
 }
 
@@ -5089,26 +5572,121 @@ function Invoke-ConfigurationPlan {
         [Parameter(Mandatory = $true)][string[]]$Targets
     )
 
+    # Each Set-* command is recorded as Applied, Failed, or Not run, so a partial
+    # Apply on a server is visible. After the first failure on a server, the
+    # remaining commands for that server are not run.
+    # Targets without Apply items (no changes, or Review Only differences only)
+    # run no Set-* command and are not added to the results. Get-NoCommandTargets
+    # lists them for the Apply summary, so they are never reported as Applied.
     $results = New-Object System.Collections.ArrayList
     foreach ($targetServer in $Targets) {
         $targetPlan = @($Changes | Where-Object { $_.Target -eq $targetServer })
-        if ($targetPlan.Count -eq 0) { continue }
+        if (@($targetPlan | Where-Object { $_.Policy -eq 'Apply' }).Count -eq 0) { continue }
         Write-Host "Configuring $targetServer..." -ForegroundColor Cyan
+
+        $operationResults = New-Object System.Collections.ArrayList
+        $serverDetail = $null
         try {
             # Review Only items are intentionally excluded from Apply. They were
             # already displayed in the preview and are never changed automatically.
             $operations = @(New-TargetOperations -TargetSnapshot $TargetSnapshots[$targetServer] -DesiredConfiguration $DesiredByTarget[$targetServer] -Plan $targetPlan)
-            foreach ($operation in $operations) {
-                Invoke-SetCommand -CommandName $operation.CommandName -Parameters $operation.Parameters
-            }
-            [void]$results.Add([PSCustomObject]@{ Server = $targetServer; Status = 'Applied'; Detail = $null })
         }
         catch {
-            [void]$results.Add([PSCustomObject]@{ Server = $targetServer; Status = 'Failed'; Detail = $_.Exception.Message })
-            Write-Warning "[$targetServer] Apply failed. Remaining operations for this target were skipped."
+            [void]$results.Add([PSCustomObject]@{ Server = $targetServer; Status = 'Failed'; Detail = $_.Exception.Message; Operations = @() })
+            Write-Warning "[$targetServer] The Set-* commands could not be built. No commands were run on this server."
+            continue
         }
+
+        # Planned Apply items must produce at least one Set-* command. Report an
+        # empty operation list as Failed instead of Applied.
+        if ($operations.Count -eq 0) {
+            $noOperationDetail = 'No Set-* command was built for the planned changes. No commands were run on this server.'
+            [void]$results.Add([PSCustomObject]@{ Server = $targetServer; Status = 'Failed'; Detail = $noOperationDetail; Operations = @() })
+            Write-Warning "[$targetServer] $noOperationDetail"
+            continue
+        }
+
+        foreach ($operation in $operations) {
+            if ($null -ne $serverDetail) {
+                [void]$operationResults.Add([PSCustomObject]@{ CommandName = $operation.CommandName; Status = 'Not run'; Detail = $null })
+                continue
+            }
+
+            try {
+                Invoke-SetCommand -CommandName $operation.CommandName -Parameters $operation.Parameters
+                [void]$operationResults.Add([PSCustomObject]@{ CommandName = $operation.CommandName; Status = 'Applied'; Detail = $null })
+            }
+            catch {
+                $serverDetail = $_.Exception.Message
+                [void]$operationResults.Add([PSCustomObject]@{ CommandName = $operation.CommandName; Status = 'Failed'; Detail = $serverDetail })
+                Write-Warning "[$targetServer] $($operation.CommandName) failed. The remaining commands for this server were not run."
+            }
+        }
+
+        [void]$results.Add([PSCustomObject]@{
+            Server     = $targetServer
+            Status     = $(if ($null -eq $serverDetail) { 'Applied' } else { 'Failed' })
+            Detail     = $serverDetail
+            Operations = @($operationResults)
+        })
     }
     return @($results)
+}
+
+# Targets where Apply runs no Set-* command: no changes planned, or Review Only
+# differences only. Used by the Apply and Verification summaries.
+function Get-NoCommandTargets {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Changes,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Targets
+    )
+
+    $items = New-Object System.Collections.ArrayList
+    foreach ($targetServer in $Targets) {
+        $targetPlan = @($Changes | Where-Object { $_.Target -eq $targetServer })
+        if (@($targetPlan | Where-Object { $_.Policy -eq 'Apply' }).Count -gt 0) { continue }
+        $reviewOnlyCount = @($targetPlan | Where-Object { $_.Policy -eq 'ReviewOnly' }).Count
+        [void]$items.Add([PSCustomObject]@{
+            Server = $targetServer
+            Reason = $(if ($reviewOnlyCount -gt 0) { 'Review Only differences only' } else { 'no changes planned' })
+        })
+    }
+    return @($items)
+}
+
+function Show-ApplyResults {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Results,
+        [AllowEmptyCollection()][array]$NoCommandTargets = @()
+    )
+
+    Write-Host ''
+    Write-Host 'Apply summary' -ForegroundColor Cyan
+    Write-Host '-------------' -ForegroundColor Cyan
+    foreach ($noCommandTarget in @($NoCommandTargets)) {
+        Write-Host ("[{0}] No commands run - {1}" -f $noCommandTarget.Server, $noCommandTarget.Reason) -ForegroundColor $(if ($noCommandTarget.Reason -eq 'Review Only differences only') { 'Yellow' } else { 'Gray' })
+    }
+    foreach ($result in $Results) {
+        Write-Host ("[{0}] {1}" -f $result.Server, $result.Status) -ForegroundColor $(if ($result.Status -eq 'Applied') { 'Green' } else { 'Red' })
+        $operations = @($result.Operations)
+        if ($operations.Count -eq 0) {
+            if ($result.Detail) { Write-Host ("  {0}" -f $result.Detail) -ForegroundColor Yellow }
+            continue
+        }
+
+        if (@($operations | Where-Object { $_.Status -ne 'Applied' }).Count -eq 0) {
+            Write-Host ("  All {0} commands applied." -f $operations.Count) -ForegroundColor Green
+            continue
+        }
+
+        $nameWidth = ($operations | ForEach-Object { ([string]$_.CommandName).Length } | Measure-Object -Maximum).Maximum
+        foreach ($operation in $operations) {
+            $color = switch ($operation.Status) { 'Applied' { 'Green' } 'Failed' { 'Red' } default { 'Yellow' } }
+            $line = "  {0}  {1}" -f ([string]$operation.CommandName).PadRight($nameWidth), $operation.Status
+            if ($operation.Detail) { $line = "{0}: {1}" -f $line, $operation.Detail }
+            Write-Host $line -ForegroundColor $color
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -5116,6 +5694,9 @@ function Invoke-ConfigurationPlan {
 # ---------------------------------------------------------------------------
 # Re-query each target after apply and compare it with the same Desired object.
 # Verification reports remaining differences instead of assuming Set-* succeeded.
+# Status values stay Verified / Mismatch / Verification failed; the final
+# success check depends on them. Review Only differences are informational and
+# never change the status.
 function Test-ConfigurationPlan {
     param(
         [Parameter(Mandatory = $true)][hashtable]$DesiredByTarget,
@@ -5128,23 +5709,60 @@ function Test-ConfigurationPlan {
             Write-Host ("[{0}] Reading configuration for verification..." -f $targetServer) -ForegroundColor DarkCyan
             $snapshot = Get-ExchangeClientAccessSnapshot -Server $targetServer
             $remaining = @(New-ChangePlan -TargetSnapshot $snapshot -DesiredConfiguration $DesiredByTarget[$targetServer] -ApplyOnly)
+            $reviewOnly = @(New-ChangePlan -TargetSnapshot $snapshot -DesiredConfiguration $DesiredByTarget[$targetServer] | Where-Object { $_.Policy -eq 'ReviewOnly' })
             [void]$results.Add([PSCustomObject]@{
-                Server           = $targetServer
-                Status           = $(if ($remaining.Count -eq 0) { 'Verified' } else { 'Mismatch' })
-                RemainingChanges = $remaining.Count
-                Detail           = $null
+                Server                = $targetServer
+                Status                = $(if ($remaining.Count -eq 0) { 'Verified' } else { 'Mismatch' })
+                RemainingChanges      = $remaining.Count
+                ReviewOnlyDifferences = $reviewOnly.Count
+                Detail                = $null
             })
         }
         catch {
             [void]$results.Add([PSCustomObject]@{
-                Server           = $targetServer
-                Status           = 'Verification failed'
-                RemainingChanges = $null
-                Detail           = $_.Exception.Message
+                Server                = $targetServer
+                Status                = 'Verification failed'
+                RemainingChanges      = $null
+                ReviewOnlyDifferences = $null
+                Detail                = $_.Exception.Message
             })
         }
     }
     return @($results)
+}
+
+function Show-VerificationResults {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Results,
+        [AllowEmptyCollection()][string[]]$NoCommandServers = @()
+    )
+
+    # Status values are unchanged. Only the wording differs for targets that had
+    # no planned changes, so they are not reported as "Planned changes verified".
+    Write-Host ''
+    Write-Host 'Verification summary' -ForegroundColor Cyan
+    Write-Host '--------------------' -ForegroundColor Cyan
+    foreach ($result in $Results) {
+        switch ($result.Status) {
+            'Verified' {
+                if (@($NoCommandServers) -contains [string]$result.Server) {
+                    Write-Host ("[{0}] No planned changes to verify" -f $result.Server) -ForegroundColor Gray
+                }
+                else {
+                    Write-Host ("[{0}] Planned changes verified" -f $result.Server) -ForegroundColor Green
+                }
+            }
+            'Mismatch' {
+                Write-Host ("[{0}] Mismatch: {1} planned change(s) not in place" -f $result.Server, $result.RemainingChanges) -ForegroundColor Red
+            }
+            default {
+                Write-Host ("[{0}] Verification failed: {1}" -f $result.Server, $result.Detail) -ForegroundColor Red
+            }
+        }
+        if ($null -ne $result.ReviewOnlyDifferences -and $result.ReviewOnlyDifferences -gt 0) {
+            Write-Host ("  Review Only differences (not changed by this script): {0}" -f $result.ReviewOnlyDifferences) -ForegroundColor DarkYellow
+        }
+    }
 }
 
 function Get-DuplicateServerNames {
@@ -5231,10 +5849,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Clone' -and $CompareOnly -and $ApplyChanges)
     Write-Host 'BLOCKER: -CompareOnly and -ApplyChanges cannot be used together.' -ForegroundColor Red
     Write-Host 'Choose either read-only comparison or explicit Clone Apply.' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host 'No Exchange configuration changes were made.' -ForegroundColor Green
-    Write-Host ''
+    Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
     Show-FeedbackFooter
-    return
+    exit 1
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Clone') {
@@ -5248,7 +5865,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Clone') {
         Write-Host ''
         Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
         Show-FeedbackFooter
-        return
+        exit 1
     }
 }
 
@@ -5388,7 +6005,7 @@ elseif ($PSCmdlet.ParameterSetName -eq 'Clone') {
         Write-Host ''
         Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
         Show-FeedbackFooter
-        return
+        exit 1
     }
 
     Write-Host "Source server : $SourceServer" -ForegroundColor Cyan
@@ -5427,7 +6044,7 @@ elseif ($PSCmdlet.ParameterSetName -eq 'Clone') {
         Write-Host ''
         Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
         Show-FeedbackFooter
-        return
+        exit 1
     }
 }
 elseif ($PSCmdlet.ParameterSetName -eq 'Restore') {
@@ -5448,7 +6065,7 @@ elseif ($PSCmdlet.ParameterSetName -eq 'Restore') {
     }
     catch {
         Write-NoChangeBlocker -Message 'The Restore backup could not be loaded or validated.' -Detail $_.Exception.Message
-        return
+        exit 1
     }
     $targets = @($restoreTarget)
 
@@ -5563,7 +6180,7 @@ foreach ($target in $targets) {
     }
     catch {
         Write-NoChangeBlocker -Message ("Unable to read current Exchange configuration from {0}." -f $target) -Detail $_.Exception.Message
-        return
+        exit 1
     }
     $targetSnapshots[$target] = $snapshot
 
@@ -5662,7 +6279,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Clone') {
         Write-Host ''
         Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
         Show-FeedbackFooter
-        return
+        exit 1
     }
 }
 
@@ -5688,16 +6305,18 @@ if ($isCloneComparison) {
     Write-Host ''
     if ($comparisonFailures.Count -gt 0) {
         Write-Host 'Comparison completed with one or more target read failures.' -ForegroundColor Yellow
+        Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
+        Show-FeedbackFooter
+        exit 1
     }
-    else {
-        Write-Host 'Comparison completed.' -ForegroundColor Green
-    }
+    Write-Host 'Comparison completed.' -ForegroundColor Green
     Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
     Show-FeedbackFooter
     return
 }
 
 Show-ChangePlan -Changes @($allChanges)
+Show-InSyncItems -DesiredByTarget $desiredByTarget -Targets $targets
 
 if ($PSCmdlet.ParameterSetName -eq 'Configure' -and -not [string]::IsNullOrWhiteSpace($OutlookAnywhereDefaultAuthenticationMethod)) {
     Write-Host ''
@@ -5705,9 +6324,26 @@ if ($PSCmdlet.ParameterSetName -eq 'Configure' -and -not [string]::IsNullOrWhite
     Write-Host '  DefaultAuthenticationMethod updates InternalClientAuthenticationMethod, ExternalClientAuthenticationMethod, and IISAuthenticationMethods together.' -ForegroundColor Yellow
 }
 
+# Command export header values, shared by the no-change report and the
+# command file below.
+$exportModeName = $PSCmdlet.ParameterSetName
+$exportSourceDescription = if ($exportModeName -eq 'Restore') { $restoreBackupPath } elseif ($exportModeName -eq 'Clone') { $SourceServer } elseif ($exportModeName -eq 'Interactive') { '<Interactive Configure>' } else { '<Configure mode>' }
+# Configure -OutlookAnywhereDefaultAuthenticationMethod changes Outlook Anywhere
+# authentication, so the export header must not report 'Not changed'.
+$exportIncludesAuthentication = ([bool]$IncludeAuthentication -or -not [string]::IsNullOrWhiteSpace($OutlookAnywhereDefaultAuthenticationMethod))
+
 if ($allChanges.Count -eq 0) {
     Write-Host 'No changes are required.' -ForegroundColor Green
     Write-Host 'Configuration is already in the desired state.' -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($OutputFile)) {
+        # -OutputFile still produces a TXT file, so the operator has a record
+        # of the targets that need no change and of any In sync items.
+        $outputPath = Resolve-OutputFilePath -Path $OutputFile
+        Export-CommandPlan -Path $outputPath -Changes @() -TargetSnapshots $targetSnapshots -DesiredByTarget $desiredByTarget -Targets $targets -SourceServer $SourceServer -Mode $exportModeName -SourceDescription $exportSourceDescription -IncludeAuthentication:$exportIncludesAuthentication
+        Write-Host ''
+        Write-Host "Report created: $outputPath" -ForegroundColor Green
+        Write-Host 'No Set-* commands were generated. No Exchange configuration changes were made.' -ForegroundColor DarkGray
+    }
     Show-FeedbackFooter
     return
 }
@@ -5734,33 +6370,36 @@ if ($actionableChanges.Count -gt 0) {
         }
         Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
         Show-FeedbackFooter
-        return
+        exit 1
     }
 }
 
 # Show values that the Set-* commands re-send unchanged in addition to the
 # Preview items, for example Outlook Anywhere SSL values that
 # Set-OutlookAnywhere requires when a hostname changes.
+$outlookAnywhereSslBlockers = @()
 if ($actionableChanges.Count -gt 0) {
     Show-AdditionalCommandParameters -Changes @($allChanges) -TargetSnapshots $targetSnapshots -DesiredByTarget $desiredByTarget -Targets $targets
+    $outlookAnywhereSslStates = @(Get-OutlookAnywhereResultingSslState -Changes @($allChanges) -TargetSnapshots $targetSnapshots -DesiredByTarget $desiredByTarget -Targets $targets)
+    Show-OutlookAnywhereResultingSslState -States $outlookAnywhereSslStates
+    $outlookAnywhereSslBlockers = @(Get-OutlookAnywhereSslBlockers -States $outlookAnywhereSslStates)
 }
 
 if (-not [string]::IsNullOrWhiteSpace($OutputFile)) {
     # Report readiness findings even though command export is non-destructive.
     # BLOCKERs prevent automatic Apply, but they do not prevent -OutputFile.
-    [void](Test-ApplyReadiness -ActionableChanges $actionableChanges -ReportOnly)
+    $exportReadiness = Test-ApplyReadiness -ActionableChanges $actionableChanges -OutlookAnywhereSslBlockers $outlookAnywhereSslBlockers -ReportOnly
 
     $outputPath = Resolve-OutputFilePath -Path $OutputFile
-    $modeName = $PSCmdlet.ParameterSetName
-    $sourceDescription = if ($modeName -eq 'Restore') { $restoreBackupPath } elseif ($modeName -eq 'Clone') { $SourceServer } elseif ($modeName -eq 'Interactive') { '<Interactive Configure>' } else { '<Configure mode>' }
-    # Configure -OutlookAnywhereDefaultAuthenticationMethod changes Outlook Anywhere
-    # authentication, so the export header must not report 'Not changed'.
-    $exportIncludesAuthentication = ([bool]$IncludeAuthentication -or -not [string]::IsNullOrWhiteSpace($OutlookAnywhereDefaultAuthenticationMethod))
-    Export-CommandPlan -Path $outputPath -Changes @($allChanges) -TargetSnapshots $targetSnapshots -DesiredByTarget $desiredByTarget -Targets $targets -SourceServer $SourceServer -Mode $modeName -SourceDescription $sourceDescription -IncludeAuthentication:$exportIncludesAuthentication
+    Export-CommandPlan -Path $outputPath -Changes @($allChanges) -TargetSnapshots $targetSnapshots -DesiredByTarget $desiredByTarget -Targets $targets -SourceServer $SourceServer -Mode $exportModeName -SourceDescription $exportSourceDescription -IncludeAuthentication:$exportIncludesAuthentication
 
     Write-Host ''
     Write-Host "Command file created: $outputPath" -ForegroundColor Green
-    Write-Host 'No Exchange configuration changes were applied. Review the TXT file and run the required commands manually.' -ForegroundColor Yellow
+    if (-not $exportReadiness) {
+        Write-Host 'The BLOCKERs above also apply to the exported commands. Resolve them before running any command.' -ForegroundColor Yellow
+    }
+    Write-Host 'No Exchange configuration changes were made. Review the TXT file and run the required commands manually.' -ForegroundColor Yellow
+    Show-FeedbackFooter
     return
 }
 
@@ -5776,14 +6415,14 @@ if ($PSCmdlet.ParameterSetName -eq 'Clone' -and (-not $ApplyChanges -or $Compare
     throw 'Internal safety guard: Clone Apply requires explicit -ApplyChanges and cannot run with -CompareOnly.'
 }
 
-if (-not (Test-ApplyReadiness -ActionableChanges $actionableChanges)) {
+if (-not (Test-ApplyReadiness -ActionableChanges $actionableChanges -OutlookAnywhereSslBlockers $outlookAnywhereSslBlockers)) {
     Show-FeedbackFooter
-    return
+    exit 1
 }
 
 $confirmation = Read-Host 'Continue and apply these changes? [Y/N]'
 if ($confirmation -notmatch '^[Yy]$') {
-    Write-Host 'Operation cancelled. No Exchange configuration changes were applied.' -ForegroundColor Yellow
+    Write-Host 'Operation cancelled. No Exchange configuration changes were made.' -ForegroundColor Yellow
     Show-FeedbackFooter
     return
 }
@@ -5807,7 +6446,7 @@ try {
 }
 catch {
     Write-NoChangeBlocker -Message 'A required pre-change backup could not be created. Apply was not started. Backup files that were already created were kept.' -Detail $_.Exception.Message
-    return
+    exit 1
 }
 Write-Host ''
 Write-Host 'Pre-change JSON backup(s) created:' -ForegroundColor Green
@@ -5827,7 +6466,39 @@ if ($driftBlockers.Count -gt 0) {
     Write-Host ''
     Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
     Show-FeedbackFooter
-    return
+    exit 1
+}
+
+# Clone: read the source again and stop when a source value used by the Apply
+# plan changed after Preview. Unrelated source changes do not block Apply.
+if ($PSCmdlet.ParameterSetName -eq 'Clone') {
+    $sourceDriftBlockers = @()
+    try {
+        Write-Host ''
+        Write-Host ("[{0}] Reading source configuration again before Apply..." -f $SourceServer) -ForegroundColor DarkCyan
+        $freshSourceSnapshot = Get-ExchangeClientAccessSnapshot -Server $SourceServer
+        $freshDesiredByTarget = @{}
+        foreach ($target in $targets) {
+            $freshDesiredByTarget[$target] = New-DesiredConfiguration -TargetSnapshot $targetSnapshots[$target] -SourceSnapshot $freshSourceSnapshot -CopyAuthentication $includeAuthenticationRequested -IncludePowerShellUrls $includePowerShellUrlsRequested -IncludeOutlookAnywhereSslRequirements $includeOutlookAnywhereSslRequirementsRequested
+        }
+        $sourceDriftBlockers = @(Get-CloneSourceDriftBlockers -Changes @($allChanges) -PreviewDesiredByTarget $desiredByTarget -FreshDesiredByTarget $freshDesiredByTarget -Targets $targets -SourceServer $SourceServer)
+    }
+    catch {
+        $sourceDriftBlockers = @(("[{0} source] The source configuration could not be read again: {1}" -f $SourceServer, $_.Exception.Message))
+    }
+
+    if ($sourceDriftBlockers.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'BLOCKER: The Clone source changed after Preview or could not be read again. Apply was not started.' -ForegroundColor Red
+        foreach ($sourceDriftBlocker in $sourceDriftBlockers) {
+            Write-Host ("  {0}" -f $sourceDriftBlocker) -ForegroundColor Yellow
+        }
+        Write-Host 'The pre-change backup(s) above were kept. Run the script again to review a new Preview.' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host 'No Exchange configuration changes were made.' -ForegroundColor DarkGray
+        Show-FeedbackFooter
+        exit 1
+    }
 }
 
 Write-Host ''
@@ -5838,21 +6509,20 @@ Write-Host ''
 Write-Host 'Verifying changes... This may take a while. Please wait.' -ForegroundColor DarkCyan
 $verification = @(Test-ConfigurationPlan -DesiredByTarget $desiredByTarget -Targets $targets)
 
-Write-Host ''
-Write-Host 'Apply summary' -ForegroundColor Cyan
-Write-Host '-------------' -ForegroundColor Cyan
-$applyResults | Format-Table Server,Status,Detail -AutoSize
+$noCommandTargets = @(Get-NoCommandTargets -Changes @($allChanges) -Targets $targets)
+Show-ApplyResults -Results @($applyResults) -NoCommandTargets @($noCommandTargets)
+Show-VerificationResults -Results @($verification) -NoCommandServers @($noCommandTargets | ForEach-Object { [string]$_.Server })
 
 Write-Host ''
-Write-Host 'Verification summary' -ForegroundColor Cyan
-Write-Host '--------------------' -ForegroundColor Cyan
-$verification | Format-Table Server,Status,RemainingChanges,Detail -AutoSize
-
 if (@($applyResults | Where-Object { $_.Status -ne 'Applied' }).Count -gt 0 -or
     @($verification | Where-Object { $_.Status -ne 'Verified' }).Count -gt 0) {
-    throw 'One or more targets could not be fully verified after configuration. Review the summary above.'
-}
-else {
-    Write-Host 'Configuration completed and verified.' -ForegroundColor Green
+    # Apply has started, so some changes may already be in place. Never report
+    # "No Exchange configuration changes were made" here.
+    Write-Host 'Apply did not complete on every server. Review the Apply and Verification summaries above.' -ForegroundColor Red
+    Write-Host 'The pre-change JSON backup(s) can be used with -Restore if required.' -ForegroundColor Yellow
     Show-FeedbackFooter
+    exit 1
 }
+
+Write-Host 'Configuration applied and verified.' -ForegroundColor Green
+Show-FeedbackFooter

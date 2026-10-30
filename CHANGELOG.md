@@ -2,26 +2,32 @@
 
 All notable changes to **ExchangeURLManager.ps1** are documented here.
 
+## 1.1 - 2026-10-30
+
+### Changes
+
+- Return exit code `1` for BLOCKER, required pre-change backup failure, drift, Apply failure, and verification failure. Completed command exports remain non-destructive and return `0`, including when readiness BLOCKERs are displayed.
+- Block automatic Apply if a planned `Set-OutlookAnywhere` operation would be rejected because SSLOffloading is False and a configured client hostname side does not require SSL. The script does not change SSLOffloading.
+
+### Improvements
+
+- Identify server-specific internal URL, Autodiscover SCP, and Outlook Anywhere InternalHostname values that already match the target's own server name as **In sync (target-specific)**, without generating Set-* commands.
+- Show the resulting Outlook Anywhere client SSL requirement values in Preview.
+- Report Apply results per command (`Applied`, `Failed`, `Not run`) and separate planned-change verification from Review Only differences.
+- Label Review Only values as `Reference` in Preview instead of `New`.
+- Simplify console messages, built-in Help, examples, and the feedback footer.
+
+### Bug Fixes
+
+- Detect target configuration changes after Preview even when the generated Set-* command text would remain unchanged.
+- Re-read the Clone source before Apply and block when source values used by the plan have changed.
+
 ## 1.0 - 2026-10-02
 
-- Initial release of ExchangeURLManager.ps1.
-- Added read-only Review mode for supported Exchange Server Client Access URLs, namespaces, authentication settings, and related configuration.
-- Added parameter-based and Interactive Configure modes with Preview, confirmation, automatic pre-change backup, Apply, and post-change verification.
-- Added live server-to-server Clone comparison with read-only behavior by default and explicit `-ApplyChanges` opt-in.
-- Added JSON Backup and same-server Restore workflows with human-readable TXT companion output.
-- Added support for OWA, ECP, EWS, MAPI, ActiveSync, OAB, Autodiscover virtual directory, Autodiscover SCP, Outlook Anywhere, and optional PowerShell URL handling.
-- Added optional authentication handling with `-IncludeAuthentication`.
-- Added optional PowerShell URL handling with `-IncludePowerShellUrls`.
-- Added optional Outlook Anywhere SSL requirement handling with `-IncludeOutlookAnywhereSslRequirements`.
-- Added source-server-specific value protection so source-specific URL, hostname, and SCP values remain Review Only during Clone.
-- Added canonical Exchange server identity validation to block source/target alias collisions and duplicate targets.
-- Added mixed-build Clone authentication protection so authentication settings remain Review Only when source and target Exchange builds differ.
-- Added runtime validation of generated `Set-*` commands and required companion parameters against the current Exchange Management Shell before export or Apply.
-- Added target refresh and drift detection before Apply; Apply is blocked when configuration changes after Preview.
-- Added mandatory pre-change JSON backup creation before Apply begins.
-- Added post-Apply verification with remaining-change reporting.
-- Added namespace validation and PowerShell URL scheme preservation.
-- Added controlled handling for unreadable targets, backup failures, Restore validation failures, and verification errors.
-- Added built-in `-Help`, comment-based PowerShell help, command export with `-OutputFile`, and console paging.
-- Validated version 1.0 in a live lab on Exchange build 15.2.1748.10 with Windows PowerShell 5.1, including successful Clone Apply and post-Apply verification with zero remaining changes.
-- Mixed-build Clone authentication behavior was not runtime-validated.
+- Initial release with Review, Configure, Interactive Configure, Clone, Backup, and Restore modes.
+- Added supported Exchange Client Access URL/namespace configuration, selected optional authentication and PowerShell URL settings, and migration-sensitive Review Only settings.
+- Added JSON backups with TXT companion files and same-server Restore.
+- Added default read-only Clone comparison and explicit `-ApplyChanges`.
+- Added Preview, confirmation, mandatory pre-change backup, target drift protection, command validation, and post-Apply verification.
+- Added built-in Help, full PowerShell help, and command/report export with `-OutputFile`.
+- Version 1.0 was validated in an Exchange 2019 LAB on build 15.2.1748.10 with Windows PowerShell 5.1; mixed-build Clone authentication was not runtime-validated.
