@@ -30,4 +30,3 @@ All notable changes to **ExchangeURLManager.ps1** are documented here.
 - Added default read-only Clone comparison and explicit `-ApplyChanges`.
 - Added Preview, confirmation, mandatory pre-change backup, target drift protection, command validation, and post-Apply verification.
 - Added built-in Help, full PowerShell help, and command/report export with `-OutputFile`.
-- Version 1.0 was validated in an Exchange 2019 LAB on build 15.2.1748.10 with Windows PowerShell 5.1; mixed-build Clone authentication was not runtime-validated.
