@@ -230,56 +230,47 @@ Change log
 1.1 - 2026-10-30
 
 Changes
-- BLOCKER, required pre-change backup, drift, Apply, and verification
-  failures now end with exit code 1.
-- Apply is blocked when Exchange would reject the Outlook Anywhere SSL
-  settings: SSL offloading is off and a side that has a hostname does
-  not require SSL. The script does not change these SSL settings.
+
+- Added an Outlook Anywhere SSL check to prevent changes that Exchange would
+  reject.
+- Apply now returns exit code 1 when an operation is blocked or fails.
 
 Improvements
-- Clone shows source values that already use the target's own server
-  name as "In sync (target-specific)" instead of Review Only.
-- Preview shows the Outlook Anywhere SSL settings that will be in place
-  after Apply.
-- Verification reports planned changes and Review Only differences
-  separately. Apply results are listed per command as Applied, Failed,
-  or Not run.
-- Review Only values in Preview are labeled "Reference" instead of "New".
-- Simpler help, examples, and console messages, and the
-  Feedback / Bugs / Contact footer.
+
+- Improved Clone handling of server-specific URLs and hostnames that already
+  match the target server.
+- Improved Apply and verification results to clearly show successful, failed,
+  and remaining changes.
 
 Bug Fixes
-- Fixed target changes made after Preview not being detected when the
-  generated Set-* command stayed the same.
-- Fixed Clone not detecting source changes made after Preview.
+
+- Fixed source and target configuration changes going undetected after Preview.
 
 1.0 - 2026-10-02
 
 New Features
-- Initial release with Review, Configure, Interactive Configure, Clone,
-  Backup, and Restore modes.
-- Versioned JSON backups for manual Backup and automatic pre-change
-  backups.
-- Opt-in switches for authentication, PowerShell URLs, and Outlook
-  Anywhere SSL settings.
-- Migration-sensitive settings stay Review Only: ASA/Kerberos, EWS MRS
-  Proxy, Outlook Anywhere SSL offloading, and PowerShell authentication
-  and RequireSSL. SSL offloading is flagged as not supported with
-  Windows Extended Protection and Hybrid Modern Authentication; SSL
-  Bridging needs topology and certificate review.
-- ASA status is read separately, so an ASA read failure does not stop
-  URL and namespace operations.
-- Outlook Anywhere is handled separately from MAPI over HTTP; its SSL
-  and authentication settings apply only to the legacy /rpc endpoint.
-- Clone keeps values that use the source server name Review Only.
-- Clone treats a short name and an FQDN of the same server as the same
-  server in source and target checks.
-- Apply reads the target again before changes and stops if the Set-*
-  commands differ from Preview.
-- Clone authentication is applied only between servers with the same
-  Exchange build. Generated Set-* commands, including companion
-  parameters, are checked against the current Exchange Management Shell
-  before export or Apply.
+
+- Initial release with Review, Configure, Interactive Configure, Clone, Backup,
+  and Restore modes.
+- Added support for Exchange Client Access URLs and namespaces, including OWA,
+  ECP, EWS, MAPI, ActiveSync, OAB, Autodiscover, and Outlook Anywhere.
+- Added Configure and Interactive Configure with Preview, confirmation,
+  automatic backup, Apply, and verification.
+- Added server-to-server Clone, read-only by default. Changes require
+  -ApplyChanges.
+- Added JSON Backup and same-server Restore, with TXT backup reports.
+- Added optional authentication, PowerShell URL, and Outlook Anywhere SSL
+  settings.
+- Added safety checks for server identities, Exchange command compatibility,
+  configuration changes after Preview, and required backups.
+- Added command and report export with -OutputFile, without changing Exchange
+  settings.
+
+Important Notes
+
+- Server-specific settings remain Review Only during Clone.
+- Authentication settings are not automatically copied between different
+  Exchange builds.
 
 License
 -------
