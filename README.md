@@ -138,7 +138,7 @@ Review the Preview and backup files before making production changes. Use at you
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) and [release notes](RELEASE-NOTES-v1.1.md).
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Feedback and issues
 
